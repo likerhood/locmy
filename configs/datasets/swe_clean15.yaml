@@ -1,0 +1,4 @@
+name: swe_clean15
+samples: /home/like/locCode/clean_subsets_new/swebench_multimodal-full-dev.clean15.samples.jsonl
+expected_samples: 92
+

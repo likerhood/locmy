@@ -1,0 +1,4 @@
+name: omni_clean15
+samples: /home/like/locCode/clean_subsets_new/omnigirl-full-candidates.clean15.v458.samples.jsonl
+expected_samples: 458
+

@@ -1,0 +1,1284 @@
+{
+  "candidate_reviews": [
+    {
+      "attempts": [],
+      "candidates": [],
+      "continue_search": null,
+      "missing_evidence": [],
+      "round_no": 1,
+      "status": "disabled"
+    }
+  ],
+  "dataset": "swe_clean15_smoke",
+  "elapsed_seconds": 0.047,
+  "evaluation_3level": {
+    "file": {
+      "acc@1": 1.0,
+      "acc@10": 1.0,
+      "acc@11": 1.0,
+      "acc@12": 1.0,
+      "acc@13": 1.0,
+      "acc@14": 1.0,
+      "acc@15": 1.0,
+      "acc@2": 1.0,
+      "acc@3": 1.0,
+      "acc@4": 1.0,
+      "acc@5": 1.0,
+      "acc@6": 1.0,
+      "acc@7": 1.0,
+      "acc@8": 1.0,
+      "acc@9": 1.0,
+      "gold_count": 1.0,
+      "map@15": 1.0,
+      "mrr@15": 1.0,
+      "pred_count": 2.0,
+      "recall@1": 1.0,
+      "recall@10": 1.0,
+      "recall@11": 1.0,
+      "recall@12": 1.0,
+      "recall@13": 1.0,
+      "recall@14": 1.0,
+      "recall@15": 1.0,
+      "recall@2": 1.0,
+      "recall@3": 1.0,
+      "recall@4": 1.0,
+      "recall@5": 1.0,
+      "recall@6": 1.0,
+      "recall@7": 1.0,
+      "recall@8": 1.0,
+      "recall@9": 1.0,
+      "set_f1@10": 0.6666666666666666,
+      "set_f1@15": 0.6666666666666666,
+      "set_f1@8": 0.6666666666666666,
+      "set_f1@all": 0.6666666666666666,
+      "set_pre@10": 0.5,
+      "set_pre@15": 0.5,
+      "set_pre@8": 0.5,
+      "set_pre@all": 0.5,
+      "set_rec@10": 1.0,
+      "set_rec@15": 1.0,
+      "set_rec@8": 1.0,
+      "set_rec@all": 1.0,
+      "set_sl@10": 1.0,
+      "set_sl@15": 1.0,
+      "set_sl@8": 1.0,
+      "set_sl@all": 1.0,
+      "strict_acc@1": 1.0,
+      "strict_acc@10": 1.0,
+      "strict_acc@11": 1.0,
+      "strict_acc@12": 1.0,
+      "strict_acc@13": 1.0,
+      "strict_acc@14": 1.0,
+      "strict_acc@15": 1.0,
+      "strict_acc@2": 1.0,
+      "strict_acc@3": 1.0,
+      "strict_acc@4": 1.0,
+      "strict_acc@5": 1.0,
+      "strict_acc@6": 1.0,
+      "strict_acc@7": 1.0,
+      "strict_acc@8": 1.0,
+      "strict_acc@9": 1.0
+    },
+    "function": {
+      "acc@1": 1.0,
+      "acc@10": 1.0,
+      "acc@11": 1.0,
+      "acc@12": 1.0,
+      "acc@13": 1.0,
+      "acc@14": 1.0,
+      "acc@15": 1.0,
+      "acc@2": 1.0,
+      "acc@3": 1.0,
+      "acc@4": 1.0,
+      "acc@5": 1.0,
+      "acc@6": 1.0,
+      "acc@7": 1.0,
+      "acc@8": 1.0,
+      "acc@9": 1.0,
+      "gold_count": 1.0,
+      "map@15": 1.0,
+      "mrr@15": 1.0,
+      "pred_count": 5.0,
+      "recall@1": 1.0,
+      "recall@10": 1.0,
+      "recall@11": 1.0,
+      "recall@12": 1.0,
+      "recall@13": 1.0,
+      "recall@14": 1.0,
+      "recall@15": 1.0,
+      "recall@2": 1.0,
+      "recall@3": 1.0,
+      "recall@4": 1.0,
+      "recall@5": 1.0,
+      "recall@6": 1.0,
+      "recall@7": 1.0,
+      "recall@8": 1.0,
+      "recall@9": 1.0,
+      "set_f1@10": 0.33333333333333337,
+      "set_f1@15": 0.33333333333333337,
+      "set_f1@8": 0.33333333333333337,
+      "set_f1@all": 0.33333333333333337,
+      "set_pre@10": 0.2,
+      "set_pre@15": 0.2,
+      "set_pre@8": 0.2,
+      "set_pre@all": 0.2,
+      "set_rec@10": 1.0,
+      "set_rec@15": 1.0,
+      "set_rec@8": 1.0,
+      "set_rec@all": 1.0,
+      "set_sl@10": 1.0,
+      "set_sl@15": 1.0,
+      "set_sl@8": 1.0,
+      "set_sl@all": 1.0,
+      "strict_acc@1": 1.0,
+      "strict_acc@10": 1.0,
+      "strict_acc@11": 1.0,
+      "strict_acc@12": 1.0,
+      "strict_acc@13": 1.0,
+      "strict_acc@14": 1.0,
+      "strict_acc@15": 1.0,
+      "strict_acc@2": 1.0,
+      "strict_acc@3": 1.0,
+      "strict_acc@4": 1.0,
+      "strict_acc@5": 1.0,
+      "strict_acc@6": 1.0,
+      "strict_acc@7": 1.0,
+      "strict_acc@8": 1.0,
+      "strict_acc@9": 1.0
+    },
+    "gold": {
+      "changed_lines": {
+        "src/plugins/plugin.legend.js": [
+          8
+        ]
+      },
+      "diagnostics": [],
+      "files": [
+        "src/plugins/plugin.legend.js"
+      ],
+      "functions": [
+        "src/plugins/plugin.legend.js::function:handleEvent"
+      ],
+      "modules": [
+        "src/plugins/plugin.legend.js::module:__file__"
+      ]
+    },
+    "module": {
+      "acc@1": 1.0,
+      "acc@10": 1.0,
+      "acc@11": 1.0,
+      "acc@12": 1.0,
+      "acc@13": 1.0,
+      "acc@14": 1.0,
+      "acc@15": 1.0,
+      "acc@2": 1.0,
+      "acc@3": 1.0,
+      "acc@4": 1.0,
+      "acc@5": 1.0,
+      "acc@6": 1.0,
+      "acc@7": 1.0,
+      "acc@8": 1.0,
+      "acc@9": 1.0,
+      "gold_count": 1.0,
+      "map@15": 1.0,
+      "mrr@15": 1.0,
+      "pred_count": 2.0,
+      "recall@1": 1.0,
+      "recall@10": 1.0,
+      "recall@11": 1.0,
+      "recall@12": 1.0,
+      "recall@13": 1.0,
+      "recall@14": 1.0,
+      "recall@15": 1.0,
+      "recall@2": 1.0,
+      "recall@3": 1.0,
+      "recall@4": 1.0,
+      "recall@5": 1.0,
+      "recall@6": 1.0,
+      "recall@7": 1.0,
+      "recall@8": 1.0,
+      "recall@9": 1.0,
+      "set_f1@10": 0.6666666666666666,
+      "set_f1@15": 0.6666666666666666,
+      "set_f1@8": 0.6666666666666666,
+      "set_f1@all": 0.6666666666666666,
+      "set_pre@10": 0.5,
+      "set_pre@15": 0.5,
+      "set_pre@8": 0.5,
+      "set_pre@all": 0.5,
+      "set_rec@10": 1.0,
+      "set_rec@15": 1.0,
+      "set_rec@8": 1.0,
+      "set_rec@all": 1.0,
+      "set_sl@10": 1.0,
+      "set_sl@15": 1.0,
+      "set_sl@8": 1.0,
+      "set_sl@all": 1.0,
+      "strict_acc@1": 1.0,
+      "strict_acc@10": 1.0,
+      "strict_acc@11": 1.0,
+      "strict_acc@12": 1.0,
+      "strict_acc@13": 1.0,
+      "strict_acc@14": 1.0,
+      "strict_acc@15": 1.0,
+      "strict_acc@2": 1.0,
+      "strict_acc@3": 1.0,
+      "strict_acc@4": 1.0,
+      "strict_acc@5": 1.0,
+      "strict_acc@6": 1.0,
+      "strict_acc@7": 1.0,
+      "strict_acc@8": 1.0,
+      "strict_acc@9": 1.0
+    }
+  },
+  "flow_summary": {
+    "backend_counts": {
+      "regex_ast_lightweight": 11,
+      "regex_static_parameter_closure": 6,
+      "statement_static_flow": 5
+    },
+    "count": 22,
+    "flow_type_counts": {
+      "serializer_backend_statement_flow": 1,
+      "shared_symbol_flow": 2,
+      "ui_event_statement_flow": 4,
+      "ui_event_to_handler": 15
+    },
+    "preview": [
+      {
+        "backend": "regex_static_parameter_closure",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {},
+        "flow_type": "ui_event_to_handler",
+        "reason": "Token `legend` appears across 4 entities/files with 0 call/import propagation hints; role coverage=0.667 for ui_event_to_handler.",
+        "term": "legend"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `legend` appears in 6 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "legend"
+      },
+      {
+        "backend": "statement_static_flow",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "same_term_statement_flow": 2
+        },
+        "flow_type": "serializer_backend_statement_flow",
+        "reason": "Term `legend` has 15 statement hits across 2 files.",
+        "term": "legend"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `hover` appears in 4 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "hover"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `leave` appears in 4 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "leave"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `option` appears in 4 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "option"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `onHover` appears in 3 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "onHover"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `onLeave` appears in 3 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "onLeave"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `onhover` appears in 3 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "onhover"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "exported_symbol_referenced_by_target": 2
+        },
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `onleave` appears in 3 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "onleave"
+      },
+      {
+        "backend": "regex_ast_lightweight",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {},
+        "flow_type": "ui_event_to_handler",
+        "reason": "Term `getlegenditemat` appears in 3 code locations; classified as ui_event_to_handler from issue/tool context.",
+        "term": "getlegenditemat"
+      },
+      {
+        "backend": "statement_static_flow",
+        "candidate_target_paths": [
+          "src/plugins/plugin.legend.js"
+        ],
+        "edge_summary": {
+          "same_term_statement_flow": 2
+        },
+        "flow_type": "ui_event_statement_flow",
+        "reason": "Term `hover` has 3 statement hits across 2 files.",
+        "term": "hover"
+      }
+    ]
+  },
+  "image_count": 1,
+  "instance_id": "chartjs__Chart.js-10301",
+  "issue_sketch": {
+    "concerns": [
+      "chart legend hover leave color restore",
+      "chart legend interaction"
+    ],
+    "dataset": "swe_clean15_smoke",
+    "entities": [
+      "onHover",
+      "onLeave",
+      "react-chartjs-2",
+      "legend",
+      "mouseout",
+      "CodeSandbox",
+      "chart.js"
+    ],
+    "evidence_roles": [
+      {
+        "evidence_type": "url",
+        "metadata": {
+          "semantic_terms": [
+            "onHover",
+            "onLeave",
+            "react-chartjs-2",
+            "legend",
+            "mouseout"
+          ],
+          "url_type": "playground"
+        },
+        "modification_prior": "medium",
+        "navigation_value": "medium",
+        "reason": "URL contributes semantic terms or reproduction context.",
+        "role": "reproduction evidence",
+        "source": "https://codesandbox.io/s/react-chartjs-2-chartjs-issue-template-3kw5p0"
+      },
+      {
+        "evidence_type": "image",
+        "metadata": {
+          "image_type": "chart_canvas_rendering",
+          "likely_layers": [],
+          "visual_queries": [
+            "pie chart legend color hover restore"
+          ]
+        },
+        "modification_prior": "low",
+        "navigation_value": "high",
+        "reason": "Images describe visible symptoms and workflow, not usually a direct file target.",
+        "role": "Workflow Context / visual symptom",
+        "source": "chart_canvas_rendering"
+      },
+      {
+        "evidence_type": "tool_observation",
+        "metadata": {
+          "semantic_queries": {
+            "semantic_queries": [
+              "legend onHover onLeave chart update mouseout"
+            ],
+            "source_files": [
+              "src/App.tsx"
+            ]
+          }
+        },
+        "modification_prior": "low",
+        "navigation_value": "high",
+        "reason": "Browser/playground artifacts describe inputs, config, console and UI behavior.",
+        "role": "Executable reproduction observation",
+        "source": "browser_reproduction_reader"
+      }
+    ],
+    "expected_effects": [
+      "rendered visual output changes",
+      "UI event callback behavior changes"
+    ],
+    "flow_obligations": [
+      {
+        "behavior": "callback or visual update",
+        "flow_type": "ui_event_to_handler",
+        "reason": "UI symptoms require event handler to implementation tracing.",
+        "required_relation": "CALL",
+        "state": "mouse/legend item state"
+      }
+    ],
+    "instance_id": "chartjs__Chart.js-10301",
+    "navigation_hints": [
+      {
+        "kind": "visual_semantic_navigation",
+        "queries": [
+          "pie chart legend color hover restore"
+        ],
+        "reason": "Use the visual symptom to choose component/layout/rendering concerns."
+      }
+    ],
+    "reasoning_trace": [
+      "Problem statement is converted to workflow/concern/state/effect before code ranking.",
+      "Explicit URLs/images are role-labeled so navigation value and modification prior can differ.",
+      "Concern edges expand horizontally; call/used-by edges navigate vertically; flow obligations validate state-to-behavior consistency."
+    ],
+    "repo": "chartjs/Chart.js",
+    "seed_policy": [],
+    "states": [
+      "legend_item"
+    ],
+    "workflow": [
+      "chart legend interaction"
+    ]
+  },
+  "llm_controller_used": false,
+  "modality": "image_and_url",
+  "problem_statement_only": false,
+  "ranked": {
+    "files": [
+      {
+        "path": "src/plugins/plugin.legend.js",
+        "reasons": [
+          "round_0_memory",
+          "bm25_all:channel:all,text:itemx7,path:plugins,text:leavex1,path:src",
+          "concern_search:path:legend,text:legendx10,text:hoverx1,text:leavex1,text:mouseoutx1",
+          "evidence_role_search:path:legend,text:legendx10,text:hoverx1,text:mouseoutx1,text:leavex1",
+          "effect_search:text:eventx1,text:hoverx1,text:leavex1,text:mouseoutx1"
+        ],
+        "score": 2744.660127405589
+      },
+      {
+        "path": "docs/sandbox/App.tsx",
+        "reasons": [
+          "bm25_all:channel:all,text:handleleavex2,text:itemx2,text:pluginsx1,text:leavex3",
+          "concern_search:text:legendx7,text:hoverx3,text:leavex3,text:react-chartjs-2x1,text:chartx8",
+          "evidence_role_search:text:legendx7,text:react-chartjs-2x1,text:hoverx3,text:leavex3,text:onhoverx1",
+          "effect_search:text:colorx2,text:hoverx3,text:leavex3",
+          "flow_search:text:legendx7,text:leavex3,text:hoverx3,text:itemx2,text:updatex2"
+        ],
+        "score": -68.91462778200271
+      }
+    ],
+    "functions": [
+      {
+        "id": "src/plugins/plugin.legend.js::function:handleEvent",
+        "kind": "function",
+        "name": "handleEvent",
+        "path": "src/plugins/plugin.legend.js",
+        "reasons": [
+          "entity_search:channel:all,exact_name:handleEvent,body:itemx5,path:plugins,body:pluginsx1",
+          "inside_ranked_file",
+          "program_flow_support",
+          "role_rerank:flow_target_path",
+          "role_rerank:flow_entity_support=8.0"
+        ],
+        "score": 649.4187177242353
+      },
+      {
+        "id": "src/plugins/plugin.legend.js::function:getLegendItemAt",
+        "kind": "function",
+        "name": "getLegendItemAt",
+        "path": "src/plugins/plugin.legend.js",
+        "reasons": [
+          "entity_search:channel:all,exact_name:getLegendItemAt,name:item,body:itemx3,path:plugins",
+          "inside_ranked_file",
+          "program_flow_support",
+          "role_rerank:flow_target_path",
+          "role_rerank:flow_entity_support=8.0"
+        ],
+        "score": 505.2093134269426
+      },
+      {
+        "id": "docs/sandbox/App.tsx::function:handleHover",
+        "kind": "function",
+        "name": "handleHover",
+        "path": "docs/sandbox/App.tsx",
+        "reasons": [
+          "entity_search:channel:all,exact_name:handleHover,body:itemx1,name:handlehover,body:handlehoverx2",
+          "inside_ranked_file",
+          "program_flow_support",
+          "role_rerank:flow_entity_support=8.0",
+          "role_rerank:evidence_seed_penalty:reproduction_or_example"
+        ],
+        "score": 317.47128374314195
+      },
+      {
+        "id": "docs/sandbox/App.tsx::function:handleLeave",
+        "kind": "function",
+        "name": "handleLeave",
+        "path": "docs/sandbox/App.tsx",
+        "reasons": [
+          "entity_search:channel:all,exact_name:handleLeave,name:handleleave,body:handleleavex2,body:itemx1",
+          "inside_ranked_file",
+          "program_flow_support",
+          "role_rerank:flow_entity_support=8.0",
+          "role_rerank:evidence_seed_penalty:reproduction_or_example"
+        ],
+        "score": 313.691283743142
+      },
+      {
+        "id": "docs/sandbox/App.tsx::function:App",
+        "kind": "function",
+        "name": "App",
+        "path": "docs/sandbox/App.tsx",
+        "reasons": [
+          "entity_search:channel:all,path:docs,body:docsx1,path:sandbox,body:sandboxx1",
+          "inside_ranked_file",
+          "program_flow_support",
+          "role_rerank:flow_entity_support=3.443",
+          "role_rerank:evidence_seed_penalty:reproduction_or_example"
+        ],
+        "score": 58.32070744435994
+      }
+    ],
+    "modules": [
+      {
+        "id": "src/plugins/plugin.legend.js::module:__file__",
+        "kind": "module",
+        "name": "__file__",
+        "path": "src/plugins/plugin.legend.js",
+        "reasons": [
+          "file_module_fallback",
+          "file_rank_support",
+          "program_flow_support",
+          "role_rerank:flow_target_path",
+          "role_rerank:flow_entity_support=8.0"
+        ],
+        "score": 416.98801274055893
+      },
+      {
+        "id": "docs/sandbox/App.tsx::module:__file__",
+        "kind": "module",
+        "name": "__file__",
+        "path": "docs/sandbox/App.tsx",
+        "reasons": [
+          "file_module_fallback",
+          "file_rank_support",
+          "program_flow_support",
+          "role_rerank:flow_entity_support=8.0",
+          "role_rerank:evidence_seed_penalty:reproduction_or_example"
+        ],
+        "score": 131.97000000000008
+      }
+    ]
+  },
+  "react_agent": {
+    "planner_used": false,
+    "steps": [
+      {
+        "action": "search entity/concern/effect anchors",
+        "candidate_paths": [
+          "src/plugins/plugin.legend.js",
+          "docs/sandbox/App.tsx"
+        ],
+        "elapsed_seconds": 0.002,
+        "llm_raw": "",
+        "next_queries": [
+          "legend",
+          "onHover",
+          "onLeave",
+          "mouseout",
+          "handleEvent",
+          "react-chartjs-2",
+          "CodeSandbox",
+          "chart.js",
+          "used by",
+          "called by onHover onLeave react-chartjs-2 legend",
+          "references onHover onLeave react-chartjs-2 legend mouseout",
+          "implementation for onHover onLeave react-chartjs-2 legend mouseout",
+          "library layer onHover onLeave react-chartjs-2 legend mouseout",
+          "historical fix onHover onLeave react-chartjs-2 legend mouseout",
+          "changed files onHover onLeave react-chartjs-2 legend mouseout",
+          "pie chart legend color hover restore",
+          "chart legend hover leave color restore",
+          "chart legend interaction",
+          "legend plugin legend event",
+          "plugin.legend legend item hover leave"
+        ],
+        "observation": {
+          "candidate_count": 7,
+          "metadata_keys": [
+            "entity_hit_count",
+            "file_hit_count"
+          ],
+          "notes": [
+            "Anchor search uses issue sketch fields, not gold files.",
+            "Evidence seeds are included as navigation anchors and handled by verifier before ranking."
+          ],
+          "seed_files": [
+            "src/plugins/plugin.legend.js",
+            "docs/sandbox/App.tsx"
+          ],
+          "status": "ok"
+        },
+        "round_no": 1,
+        "thought": "Start from issue sketch anchors so URL/image evidence is not treated as a gold target too early.",
+        "token_usage": {},
+        "tool": "SearchAnchor",
+        "tool_input": {
+          "candidate_count_before": 0,
+          "mode": "concern",
+          "queries": [
+            "legend",
+            "onHover",
+            "onLeave",
+            "mouseout",
+            "handleEvent",
+            "react-chartjs-2",
+            "CodeSandbox",
+            "chart.js",
+            "used by",
+            "called by onHover onLeave react-chartjs-2 legend",
+            "references onHover onLeave react-chartjs-2 legend mouseout",
+            "implementation for onHover onLeave react-chartjs-2 legend mouseout",
+            "library layer onHover onLeave react-chartjs-2 legend mouseout",
+            "historical fix onHover onLeave react-chartjs-2 legend mouseout",
+            "changed files onHover onLeave react-chartjs-2 legend mouseout",
+            "pie chart legend color hover restore",
+            "chart legend hover leave color restore",
+            "chart legend interaction",
+            "legend plugin legend event",
+            "plugin.legend legend item hover leave",
+            "onLeave callback",
+            "call opts.onLeave previous hoveredItem",
+            "onHover callback",
+            "call opts.onHover hoveredItem",
+            "mousemove handleEvent afterEvent _getLegendItemAt",
+            "mouseout mouseleave event boundary",
+            "chart plugin afterEvent handleEvent",
+            "legendHitBoxes _hoveredItem itemsEqual",
+            "src/plugins/plugin.legend",
+            "plugins legend hover leave afterEvent handleEvent"
+          ]
+        }
+      },
+      {
+        "action": "navigate call edges",
+        "candidate_paths": [
+          "src/plugins/plugin.legend.js",
+          "docs/sandbox/App.tsx"
+        ],
+        "elapsed_seconds": 0.0,
+        "llm_raw": "",
+        "next_queries": [
+          "legend",
+          "onHover",
+          "onLeave",
+          "mouseout",
+          "handleEvent",
+          "react-chartjs-2",
+          "CodeSandbox",
+          "chart.js",
+          "used by",
+          "called by onHover onLeave react-chartjs-2 legend",
+          "references onHover onLeave react-chartjs-2 legend mouseout",
+          "implementation for onHover onLeave react-chartjs-2 legend mouseout",
+          "library layer onHover onLeave react-chartjs-2 legend mouseout",
+          "historical fix onHover onLeave react-chartjs-2 legend mouseout",
+          "changed files onHover onLeave react-chartjs-2 legend mouseout",
+          "pie chart legend color hover restore",
+          "chart legend hover leave color restore",
+          "chart legend interaction",
+          "legend plugin legend event",
+          "plugin.legend legend item hover leave"
+        ],
+        "observation": {
+          "candidate_count": 0,
+          "metadata_keys": [
+            "allowed_edge_types",
+            "hit_count"
+          ],
+          "notes": [
+            "Typed edges are navigation/semantic edges, not full statement-level dataflow.",
+            "Concern mode is horizontal; call/used_by mode is vertical."
+          ],
+          "seed_files": [
+            "src/plugins/plugin.legend.js",
+            "docs/sandbox/App.tsx"
+          ],
+          "status": "empty"
+        },
+        "round_no": 2,
+        "thought": "Expand candidate frontier through call edges after anchor search.",
+        "token_usage": {},
+        "tool": "NavigateCode",
+        "tool_input": {
+          "candidate_count_before": 0,
+          "mode": "call",
+          "queries": [
+            "legend",
+            "onHover",
+            "onLeave",
+            "mouseout",
+            "handleEvent",
+            "react-chartjs-2",
+            "CodeSandbox",
+            "chart.js",
+            "used by",
+            "called by onHover onLeave react-chartjs-2 legend",
+            "references onHover onLeave react-chartjs-2 legend mouseout",
+            "implementation for onHover onLeave react-chartjs-2 legend mouseout",
+            "library layer onHover onLeave react-chartjs-2 legend mouseout",
+            "historical fix onHover onLeave react-chartjs-2 legend mouseout",
+            "changed files onHover onLeave react-chartjs-2 legend mouseout",
+            "pie chart legend color hover restore",
+            "chart legend hover leave color restore",
+            "chart legend interaction",
+            "legend plugin legend event",
+            "plugin.legend legend item hover leave",
+            "onLeave callback",
+            "call opts.onLeave previous hoveredItem",
+            "onHover callback",
+            "call opts.onHover hoveredItem",
+            "mousemove handleEvent afterEvent _getLegendItemAt",
+            "mouseout mouseleave event boundary",
+            "chart plugin afterEvent handleEvent",
+            "legendHitBoxes _hoveredItem itemsEqual",
+            "src/plugins/plugin.legend",
+            "plugins legend hover leave afterEvent handleEvent"
+          ]
+        }
+      },
+      {
+        "action": "check state/effect obligations against candidate code",
+        "candidate_paths": [
+          "src/plugins/plugin.legend.js",
+          "docs/sandbox/App.tsx"
+        ],
+        "elapsed_seconds": 0.008,
+        "llm_raw": "",
+        "next_queries": [
+          "legend",
+          "onHover",
+          "onLeave",
+          "mouseout",
+          "handleEvent",
+          "react-chartjs-2",
+          "CodeSandbox",
+          "chart.js",
+          "used by",
+          "called by onHover onLeave react-chartjs-2 legend",
+          "references onHover onLeave react-chartjs-2 legend mouseout",
+          "implementation for onHover onLeave react-chartjs-2 legend mouseout",
+          "library layer onHover onLeave react-chartjs-2 legend mouseout",
+          "historical fix onHover onLeave react-chartjs-2 legend mouseout",
+          "changed files onHover onLeave react-chartjs-2 legend mouseout",
+          "pie chart legend color hover restore",
+          "chart legend hover leave color restore",
+          "chart legend interaction",
+          "legend plugin legend event",
+          "plugin.legend legend item hover leave"
+        ],
+        "observation": {
+          "candidate_count": 21,
+          "metadata_keys": [
+            "backend_timings",
+            "deep_flow_enabled",
+            "flow_chains",
+            "flow_coverage",
+            "flow_mode",
+            "flow_obligations",
+            "interprocedural_flows",
+            "parameter_closures",
+            "program_flows",
+            "runtime_trace_verifications",
+            "statement_flows",
+            "static_slices"
+          ],
+          "notes": [
+            "This is the ARISE-inspired verification layer: state/parameter/effect flow is checked after candidate discovery.",
+            "StaticSlice adds ARISE-inspired statement def-use/call-boundary evidence, while RuntimeTraceVerifier adds DAIRA-style observed execution evidence when available.",
+            "InterproceduralFlow adds a best-effort cross-function parameter/state closure inspired by ARISE's def-use graph.",
+            "Current implementation records missing precision backends for future SCIP/CodeQL/tree-sitter upgrades."
+          ],
+          "seed_files": [
+            "src/plugins/plugin.legend.js",
+            "docs/sandbox/App.tsx"
+          ],
+          "status": "ok"
+        },
+        "round_no": 3,
+        "thought": "Validate whether candidate files carry the issue state/parameter into the expected behavior.",
+        "token_usage": {},
+        "tool": "TraceFlow",
+        "tool_input": {
+          "candidate_count_before": 0,
+          "mode": "flow",
+          "queries": [
+            "legend",
+            "onHover",
+            "onLeave",
+            "mouseout",
+            "handleEvent",
+            "react-chartjs-2",
+            "CodeSandbox",
+            "chart.js",
+            "used by",
+            "called by onHover onLeave react-chartjs-2 legend",
+            "references onHover onLeave react-chartjs-2 legend mouseout",
+            "implementation for onHover onLeave react-chartjs-2 legend mouseout",
+            "library layer onHover onLeave react-chartjs-2 legend mouseout",
+            "historical fix onHover onLeave react-chartjs-2 legend mouseout",
+            "changed files onHover onLeave react-chartjs-2 legend mouseout",
+            "pie chart legend color hover restore",
+            "chart legend hover leave color restore",
+            "chart legend interaction",
+            "legend plugin legend event",
+            "plugin.legend legend item hover leave",
+            "onLeave callback",
+            "call opts.onLeave previous hoveredItem",
+            "onHover callback",
+            "call opts.onHover hoveredItem",
+            "mousemove handleEvent afterEvent _getLegendItemAt",
+            "mouseout mouseleave event boundary",
+            "chart plugin afterEvent handleEvent",
+            "legendHitBoxes _hoveredItem itemsEqual",
+            "src/plugins/plugin.legend",
+            "plugins legend hover leave afterEvent handleEvent"
+          ]
+        }
+      }
+    ],
+    "strategy": "ReAct planner/controller over SearchAnchor, NavigateCode, TraceFlow and ReadCode",
+    "summary": {
+      "candidate_count": 2,
+      "flow_trace_count": 23,
+      "planner_used": false,
+      "read_file_count": 0,
+      "step_count": 3
+    }
+  },
+  "repo": "chartjs/Chart.js",
+  "search_trace": [
+    {
+      "next_queries": [],
+      "round_evaluation": {},
+      "step": "issue_sketch",
+      "stop_decision": {},
+      "strategy": "evidence role understanding before localization",
+      "top_files": []
+    },
+    {
+      "next_queries": [],
+      "round_evaluation": {},
+      "step": "query_generation",
+      "stop_decision": {},
+      "strategy": "multi-channel SearchAnchor query generation: explicit entity + evidence role + concern + effect + flow",
+      "top_files": []
+    },
+    {
+      "next_queries": [],
+      "round_evaluation": {},
+      "step": "dynamic_search_loop",
+      "stop_decision": {},
+      "strategy": "CoSIL-style cheap recall/prune first, scoped graph navigation second, then ARISE-style flow verification and explicit navigation policy",
+      "top_files": []
+    },
+    {
+      "next_queries": [],
+      "round_evaluation": {},
+      "step": "graph_scope_prefilter",
+      "stop_decision": {},
+      "strategy": "cosil_style_cheap_prefilter_then_scoped_graph",
+      "top_files": []
+    },
+    {
+      "next_queries": [],
+      "round_evaluation": {},
+      "step": "repository_graph",
+      "stop_decision": {},
+      "strategy": "language-aware heterogeneous graph over scoped files/entities/styles/config/docs",
+      "top_files": []
+    },
+    {
+      "next_queries": [],
+      "round_evaluation": {},
+      "step": "phase_timings",
+      "stop_decision": {},
+      "strategy": "timing instrumentation for LLM/tool/search bottleneck diagnosis",
+      "top_files": []
+    },
+    {
+      "next_queries": [
+        "legend",
+        "onHover",
+        "onLeave",
+        "mouseout",
+        "handleEvent",
+        "react-chartjs-2",
+        "CodeSandbox",
+        "chart.js",
+        "used by",
+        "called by onHover onLeave react-chartjs-2 legend"
+      ],
+      "round_evaluation": {},
+      "step": "react_tool_agent_bootstrap",
+      "stop_decision": {},
+      "strategy": "ReAct planner/controller over SearchAnchor, NavigateCode, TraceFlow and ReadCode",
+      "top_files": []
+    },
+    {
+      "next_queries": [
+        "chart legend hover leave color restore",
+        "chart legend interaction",
+        "legend_item",
+        "rendered visual output changes",
+        "UI event callback behavior changes",
+        "ui_event_to_handler",
+        "App",
+        "plugin.legend"
+      ],
+      "round_evaluation": {},
+      "step": "four_tool_agent_bootstrap",
+      "stop_decision": {},
+      "strategy": "SearchAnchor -> NavigateCode(concern/call/used_by) -> TraceFlow -> ReadCode",
+      "top_files": []
+    },
+    {
+      "next_queries": [
+        "plugins",
+        "plugin.legend.js",
+        "plugin.legend",
+        "function handleEvent",
+        "getLegendItemAt",
+        "function getLegendItemAt",
+        "docs",
+        "sandbox",
+        "App.tsx",
+        "App"
+      ],
+      "round_evaluation": {
+        "applicability": {
+          "diagnostics": [],
+          "file_gold_count": 1,
+          "file_module_fallback_files": [],
+          "function_applicable": true,
+          "function_empty_reason": "",
+          "function_gold_count": 1,
+          "module_applicable": true,
+          "module_gold_count": 1,
+          "no_changed_line_files": [],
+          "non_function_or_unmapped_files": []
+        },
+        "file": {
+          "acc@1": 1.0,
+          "acc@10": 1.0,
+          "acc@11": 1.0,
+          "acc@12": 1.0,
+          "acc@13": 1.0,
+          "acc@14": 1.0,
+          "acc@15": 1.0,
+          "acc@2": 1.0,
+          "acc@3": 1.0,
+          "acc@4": 1.0,
+          "acc@5": 1.0,
+          "acc@6": 1.0,
+          "acc@7": 1.0,
+          "acc@8": 1.0,
+          "acc@9": 1.0,
+          "gold_count": 1.0,
+          "map@15": 1.0,
+          "mrr@15": 1.0,
+          "pred_count": 2.0,
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@11": 1.0,
+          "recall@12": 1.0,
+          "recall@13": 1.0,
+          "recall@14": 1.0,
+          "recall@15": 1.0,
+          "recall@2": 1.0,
+          "recall@3": 1.0,
+          "recall@4": 1.0,
+          "recall@5": 1.0,
+          "recall@6": 1.0,
+          "recall@7": 1.0,
+          "recall@8": 1.0,
+          "recall@9": 1.0,
+          "set_f1@10": 0.6666666666666666,
+          "set_f1@15": 0.6666666666666666,
+          "set_f1@8": 0.6666666666666666,
+          "set_f1@all": 0.6666666666666666,
+          "set_pre@10": 0.5,
+          "set_pre@15": 0.5,
+          "set_pre@8": 0.5,
+          "set_pre@all": 0.5,
+          "set_rec@10": 1.0,
+          "set_rec@15": 1.0,
+          "set_rec@8": 1.0,
+          "set_rec@all": 1.0,
+          "set_sl@10": 1.0,
+          "set_sl@15": 1.0,
+          "set_sl@8": 1.0,
+          "set_sl@all": 1.0,
+          "strict_acc@1": 1.0,
+          "strict_acc@10": 1.0,
+          "strict_acc@11": 1.0,
+          "strict_acc@12": 1.0,
+          "strict_acc@13": 1.0,
+          "strict_acc@14": 1.0,
+          "strict_acc@15": 1.0,
+          "strict_acc@2": 1.0,
+          "strict_acc@3": 1.0,
+          "strict_acc@4": 1.0,
+          "strict_acc@5": 1.0,
+          "strict_acc@6": 1.0,
+          "strict_acc@7": 1.0,
+          "strict_acc@8": 1.0,
+          "strict_acc@9": 1.0
+        },
+        "function": {
+          "acc@1": 1.0,
+          "acc@10": 1.0,
+          "acc@11": 1.0,
+          "acc@12": 1.0,
+          "acc@13": 1.0,
+          "acc@14": 1.0,
+          "acc@15": 1.0,
+          "acc@2": 1.0,
+          "acc@3": 1.0,
+          "acc@4": 1.0,
+          "acc@5": 1.0,
+          "acc@6": 1.0,
+          "acc@7": 1.0,
+          "acc@8": 1.0,
+          "acc@9": 1.0,
+          "gold_count": 1.0,
+          "map@15": 1.0,
+          "mrr@15": 1.0,
+          "pred_count": 5.0,
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@11": 1.0,
+          "recall@12": 1.0,
+          "recall@13": 1.0,
+          "recall@14": 1.0,
+          "recall@15": 1.0,
+          "recall@2": 1.0,
+          "recall@3": 1.0,
+          "recall@4": 1.0,
+          "recall@5": 1.0,
+          "recall@6": 1.0,
+          "recall@7": 1.0,
+          "recall@8": 1.0,
+          "recall@9": 1.0,
+          "set_f1@10": 0.33333333333333337,
+          "set_f1@15": 0.33333333333333337,
+          "set_f1@8": 0.33333333333333337,
+          "set_f1@all": 0.33333333333333337,
+          "set_pre@10": 0.2,
+          "set_pre@15": 0.2,
+          "set_pre@8": 0.2,
+          "set_pre@all": 0.2,
+          "set_rec@10": 1.0,
+          "set_rec@15": 1.0,
+          "set_rec@8": 1.0,
+          "set_rec@all": 1.0,
+          "set_sl@10": 1.0,
+          "set_sl@15": 1.0,
+          "set_sl@8": 1.0,
+          "set_sl@all": 1.0,
+          "strict_acc@1": 1.0,
+          "strict_acc@10": 1.0,
+          "strict_acc@11": 1.0,
+          "strict_acc@12": 1.0,
+          "strict_acc@13": 1.0,
+          "strict_acc@14": 1.0,
+          "strict_acc@15": 1.0,
+          "strict_acc@2": 1.0,
+          "strict_acc@3": 1.0,
+          "strict_acc@4": 1.0,
+          "strict_acc@5": 1.0,
+          "strict_acc@6": 1.0,
+          "strict_acc@7": 1.0,
+          "strict_acc@8": 1.0,
+          "strict_acc@9": 1.0
+        },
+        "gold": {
+          "changed_lines": {
+            "src/plugins/plugin.legend.js": [
+              8
+            ]
+          },
+          "diagnostics": [],
+          "files": [
+            "src/plugins/plugin.legend.js"
+          ],
+          "functions": [
+            "src/plugins/plugin.legend.js::function:handleEvent"
+          ],
+          "modules": [
+            "src/plugins/plugin.legend.js::module:__file__"
+          ]
+        },
+        "module": {
+          "acc@1": 1.0,
+          "acc@10": 1.0,
+          "acc@11": 1.0,
+          "acc@12": 1.0,
+          "acc@13": 1.0,
+          "acc@14": 1.0,
+          "acc@15": 1.0,
+          "acc@2": 1.0,
+          "acc@3": 1.0,
+          "acc@4": 1.0,
+          "acc@5": 1.0,
+          "acc@6": 1.0,
+          "acc@7": 1.0,
+          "acc@8": 1.0,
+          "acc@9": 1.0,
+          "gold_count": 1.0,
+          "map@15": 1.0,
+          "mrr@15": 1.0,
+          "pred_count": 2.0,
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@11": 1.0,
+          "recall@12": 1.0,
+          "recall@13": 1.0,
+          "recall@14": 1.0,
+          "recall@15": 1.0,
+          "recall@2": 1.0,
+          "recall@3": 1.0,
+          "recall@4": 1.0,
+          "recall@5": 1.0,
+          "recall@6": 1.0,
+          "recall@7": 1.0,
+          "recall@8": 1.0,
+          "recall@9": 1.0,
+          "set_f1@10": 0.6666666666666666,
+          "set_f1@15": 0.6666666666666666,
+          "set_f1@8": 0.6666666666666666,
+          "set_f1@all": 0.6666666666666666,
+          "set_pre@10": 0.5,
+          "set_pre@15": 0.5,
+          "set_pre@8": 0.5,
+          "set_pre@all": 0.5,
+          "set_rec@10": 1.0,
+          "set_rec@15": 1.0,
+          "set_rec@8": 1.0,
+          "set_rec@all": 1.0,
+          "set_sl@10": 1.0,
+          "set_sl@15": 1.0,
+          "set_sl@8": 1.0,
+          "set_sl@all": 1.0,
+          "strict_acc@1": 1.0,
+          "strict_acc@10": 1.0,
+          "strict_acc@11": 1.0,
+          "strict_acc@12": 1.0,
+          "strict_acc@13": 1.0,
+          "strict_acc@14": 1.0,
+          "strict_acc@15": 1.0,
+          "strict_acc@2": 1.0,
+          "strict_acc@3": 1.0,
+          "strict_acc@4": 1.0,
+          "strict_acc@5": 1.0,
+          "strict_acc@6": 1.0,
+          "strict_acc@7": 1.0,
+          "strict_acc@8": 1.0,
+          "strict_acc@9": 1.0
+        },
+        "note": "diagnostic only; gold is not used for ranking",
+        "status": "ok"
+      },
+      "step": "round_1",
+      "stop_decision": {
+        "confidence": {
+          "axes": {
+            "concern": true,
+            "flow": true,
+            "path": true,
+            "program": false,
+            "read": false,
+            "review": false,
+            "source": true,
+            "symbol": true
+          },
+          "axis_count": 5,
+          "confidence": 0.98,
+          "gap": 2813.575,
+          "top_path": "src/plugins/plugin.legend.js",
+          "top_score": 2744.66
+        },
+        "reason": "high_confidence_source_candidate",
+        "stop": true,
+        "threshold": 0.78,
+        "top_paths": [
+          "src/plugins/plugin.legend.js",
+          "docs/sandbox/App.tsx"
+        ]
+      },
+      "strategy": "search -> read snippets -> trace call/dataflow -> verify -> derive next frontier",
+      "top_files": [
+        "src/plugins/plugin.legend.js",
+        "docs/sandbox/App.tsx"
+      ]
+    }
+  ],
+  "status": "ok",
+  "token_usage_summary": {},
+  "url_count": 1
+}

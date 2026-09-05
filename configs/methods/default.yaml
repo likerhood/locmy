@@ -1,0 +1,6 @@
+name: evidence_concern_flow_default
+use_images: true
+use_urls: true
+use_flow_verifier: true
+max_agent_turns: 8
+

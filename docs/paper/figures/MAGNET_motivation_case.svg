@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="860" viewBox="0 0 1600 860" role="img" aria-labelledby="title desc">
+  <title id="title">Two observations behind evidence-adaptive issue localization</title>
+  <desc id="desc">Text, images, and URLs have different roles and should not directly determine patch targets. Business concern search, dependency navigation, and local data-flow verification cover different distances and should be invoked adaptively under a budget.</desc>
+  <defs>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#2B6CB0"/></marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#2F855A"/></marker>
+    <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,5 L0,10 z" fill="#C94C4C"/></marker>
+  </defs>
+
+  <rect width="1600" height="860" fill="#F7F9FB"/>
+  <text x="56" y="55" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" fill="#17324A">Two observations motivate evidence-adaptive localization</text>
+  <text x="56" y="88" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#64788A">Issue evidence guides actions; program evidence grounds targets.</text>
+
+  <!-- Observation 1 -->
+  <g id="observation-one">
+    <rect x="50" y="118" width="720" height="535" rx="8" fill="#FFFFFF" stroke="#C8D5E1" stroke-width="2"/>
+    <circle cx="84" cy="158" r="18" fill="#2B6CB0"/>
+    <text x="84" y="165" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#FFFFFF">1</text>
+    <text x="115" y="166" font-family="Arial" font-size="25" font-weight="700" fill="#17324A">Evidence has roles</text>
+
+    <rect x="86" y="204" width="174" height="86" rx="7" fill="#FFF6E8" stroke="#DFA24A" stroke-width="2"/>
+    <text x="173" y="236" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#8A601F">TEXT</text>
+    <text x="173" y="266" text-anchor="middle" font-family="Arial" font-size="15" fill="#8A601F">expected effect</text>
+    <rect x="298" y="204" width="174" height="86" rx="7" fill="#F4EFF9" stroke="#A98BC6" stroke-width="2"/>
+    <text x="385" y="236" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#654B80">IMAGE</text>
+    <text x="385" y="266" text-anchor="middle" font-family="Arial" font-size="15" fill="#654B80">workflow / state</text>
+    <rect x="510" y="204" width="174" height="86" rx="7" fill="#EDF5FC" stroke="#6FA7D8" stroke-width="2"/>
+    <text x="597" y="236" text-anchor="middle" font-family="Arial" font-size="18" font-weight="700" fill="#2B6CB0">URL</text>
+    <text x="597" y="266" text-anchor="middle" font-family="Arial" font-size="15" fill="#2B6CB0">reference anchor</text>
+
+    <path d="M173 290 L173 333 L275 333" fill="none" stroke="#C94C4C" stroke-width="3" marker-end="url(#arrow-red)"/>
+    <path d="M385 290 L385 310" fill="none" stroke="#C94C4C" stroke-width="3" marker-end="url(#arrow-red)"/>
+    <path d="M597 290 L597 333 L495 333" fill="none" stroke="#C94C4C" stroke-width="3" marker-end="url(#arrow-red)"/>
+    <rect x="278" y="310" width="214" height="50" rx="25" fill="#FFF0EF" stroke="#C94C4C" stroke-width="2"/>
+    <text x="385" y="341" text-anchor="middle" font-family="Arial" font-size="17" font-weight="700" fill="#A93E3E">FLAT FUSION</text>
+    <path d="M385 360 L385 397" fill="none" stroke="#C94C4C" stroke-width="3" marker-end="url(#arrow-red)"/>
+    <rect x="286" y="404" width="198" height="56" rx="7" fill="#FFF0EF" stroke="#C94C4C" stroke-width="2"/>
+    <text x="385" y="429" text-anchor="middle" font-family="Arial" font-size="16" font-weight="700" fill="#A93E3E">WRONG TARGET</text>
+    <text x="385" y="449" text-anchor="middle" font-family="Arial" font-size="14" fill="#A93E3E">symptom becomes patch</text>
+
+    <rect x="84" y="493" width="602" height="101" rx="7" fill="#EFF7FC" stroke="#82B4D9" stroke-width="2"/>
+    <text x="111" y="523" font-family="Arial" font-size="16" font-weight="700" fill="#2B6CB0">ROLE PARSING</text>
+    <line x1="235" y1="517" x2="278" y2="517" stroke="#2B6CB0" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="292" y="503" width="102" height="38" rx="6" fill="#FFFFFF" stroke="#6FA7D8"/>
+    <text x="343" y="527" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#2B6CB0">SEARCH</text>
+    <rect x="409" y="503" width="112" height="38" rx="6" fill="#FFFFFF" stroke="#6FA7D8"/>
+    <text x="465" y="527" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#2B6CB0">NAVIGATE</text>
+    <rect x="536" y="503" width="112" height="38" rx="6" fill="#FFFFFF" stroke="#6FA7D8"/>
+    <text x="592" y="527" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#2B6CB0">VERIFY</text>
+    <text x="385" y="574" text-anchor="middle" font-family="Arial" font-size="17" font-weight="700" fill="#17324A">Evidence relevance ≠ modification likelihood</text>
+    <rect x="84" y="611" width="602" height="26" rx="5" fill="#E8F1F7"/>
+    <text x="385" y="629" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#45637A">Use evidence to choose the next action</text>
+  </g>
+
+  <!-- Observation 2 -->
+  <g id="observation-two">
+    <rect x="800" y="118" width="750" height="535" rx="8" fill="#FFFFFF" stroke="#C8D5E1" stroke-width="2"/>
+    <circle cx="834" cy="158" r="18" fill="#2F855A"/>
+    <text x="834" y="165" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#FFFFFF">2</text>
+    <text x="865" y="166" font-family="Arial" font-size="25" font-weight="700" fill="#17324A">Code has two distances</text>
+
+    <text x="846" y="211" font-family="Arial" font-size="15" font-weight="700" fill="#2F855A">BUSINESS DISTANCE</text>
+    <text x="846" y="234" font-family="Arial" font-size="14" fill="#5E7468">same concern, scattered modules</text>
+    <rect x="846" y="260" width="103" height="48" rx="6" fill="#ECF7F0" stroke="#67B98A" stroke-width="2"/>
+    <text x="897" y="290" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#24734A">UI</text>
+    <line x1="949" y1="284" x2="1000" y2="284" stroke="#2F855A" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#arrow-green)"/>
+    <rect x="1012" y="260" width="103" height="48" rx="6" fill="#ECF7F0" stroke="#67B98A" stroke-width="2"/>
+    <text x="1063" y="290" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#24734A">STATE</text>
+    <line x1="1115" y1="284" x2="1166" y2="284" stroke="#2F855A" stroke-width="3" stroke-dasharray="7 5" marker-end="url(#arrow-green)"/>
+    <rect x="1178" y="260" width="103" height="48" rx="6" fill="#ECF7F0" stroke="#67B98A" stroke-width="2"/>
+    <text x="1229" y="290" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#24734A">SERVICE</text>
+    <text x="1320" y="277" font-family="Arial" font-size="14" font-weight="700" fill="#A93E3E">Concern only</text>
+    <text x="1320" y="299" font-family="Arial" font-size="14" fill="#A93E3E">related, unverified</text>
+
+    <text x="846" y="352" font-family="Arial" font-size="15" font-weight="700" fill="#2B6CB0">PROGRAM DISTANCE</text>
+    <text x="846" y="375" font-family="Arial" font-size="14" fill="#5C7183">dependency + value propagation</text>
+    <rect x="886" y="401" width="109" height="48" rx="6" fill="#EDF5FC" stroke="#6FA7D8" stroke-width="2"/>
+    <text x="940" y="431" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#2B6CB0">ENTRY</text>
+    <line x1="995" y1="425" x2="1050" y2="425" stroke="#2B6CB0" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="1062" y="401" width="109" height="48" rx="6" fill="#F4EFF9" stroke="#A98BC6" stroke-width="2"/>
+    <text x="1116" y="431" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#654B80">GUARD</text>
+    <line x1="1171" y1="425" x2="1226" y2="425" stroke="#2B6CB0" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="1238" y="401" width="109" height="48" rx="6" fill="#ECF7F0" stroke="#67B98A" stroke-width="2"/>
+    <text x="1292" y="431" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#24734A">EFFECT</text>
+    <text x="1372" y="418" font-family="Arial" font-size="14" font-weight="700" fill="#A93E3E">Call only</text>
+    <text x="1372" y="440" font-family="Arial" font-size="14" fill="#A93E3E">connected, incomplete</text>
+
+    <rect x="846" y="493" width="658" height="101" rx="7" fill="#F2F8F5" stroke="#83C39D" stroke-width="2"/>
+    <rect x="870" y="511" width="150" height="44" rx="6" fill="#FFFFFF" stroke="#67B98A"/>
+    <text x="945" y="530" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#24734A">CONCERN</text>
+    <text x="945" y="548" text-anchor="middle" font-family="Arial" font-size="12" fill="#24734A">recall</text>
+    <line x1="1020" y1="533" x2="1060" y2="533" stroke="#2F855A" stroke-width="3" marker-end="url(#arrow-green)"/>
+    <rect x="1072" y="511" width="150" height="44" rx="6" fill="#FFFFFF" stroke="#6FA7D8"/>
+    <text x="1147" y="530" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#2B6CB0">DEPENDENCY</text>
+    <text x="1147" y="548" text-anchor="middle" font-family="Arial" font-size="12" fill="#2B6CB0">navigate</text>
+    <line x1="1222" y1="533" x2="1262" y2="533" stroke="#2B6CB0" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="1274" y="511" width="150" height="44" rx="6" fill="#FFFFFF" stroke="#A98BC6"/>
+    <text x="1349" y="530" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#654B80">LOCAL FLOW</text>
+    <text x="1349" y="548" text-anchor="middle" font-family="Arial" font-size="12" fill="#654B80">verify</text>
+    <text x="1175" y="579" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#17324A">Stage analysis by evidence value</text>
+    <rect x="846" y="611" width="658" height="26" rx="5" fill="#FFF0EF"/>
+    <text x="1175" y="629" text-anchor="middle" font-family="Arial" font-size="14" font-weight="700" fill="#A93E3E">Fixed depth: 365 s · 157k tokens · median 14/14 rounds</text>
+  </g>
+
+  <!-- Derived design -->
+  <g id="derived-design">
+    <rect x="50" y="687" width="1500" height="125" rx="8" fill="#17324A"/>
+    <text x="88" y="723" font-family="Arial" font-size="18" font-weight="700" fill="#9FD3F2">MAGNET</text>
+    <text x="88" y="754" font-family="Arial" font-size="14" fill="#DCE8F0">evidence-adaptive loop</text>
+    <rect x="263" y="714" width="177" height="55" rx="7" fill="#FFFFFF"/>
+    <text x="351" y="738" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#2B6CB0">UNDERSTAND</text>
+    <text x="351" y="758" text-anchor="middle" font-family="Arial" font-size="12" fill="#5C7183">evidence roles</text>
+    <line x1="440" y1="742" x2="500" y2="742" stroke="#9FD3F2" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="512" y="714" width="177" height="55" rx="7" fill="#FFFFFF"/>
+    <text x="600" y="738" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#2F855A">SEARCH</text>
+    <text x="600" y="758" text-anchor="middle" font-family="Arial" font-size="12" fill="#5E7468">concern breadth</text>
+    <line x1="689" y1="742" x2="749" y2="742" stroke="#9FD3F2" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="761" y="714" width="177" height="55" rx="7" fill="#FFFFFF"/>
+    <text x="849" y="738" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#2B6CB0">NAVIGATE</text>
+    <text x="849" y="758" text-anchor="middle" font-family="Arial" font-size="12" fill="#5C7183">program depth</text>
+    <line x1="938" y1="742" x2="998" y2="742" stroke="#9FD3F2" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="1010" y="714" width="177" height="55" rx="7" fill="#FFFFFF"/>
+    <text x="1098" y="738" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#654B80">VERIFY</text>
+    <text x="1098" y="758" text-anchor="middle" font-family="Arial" font-size="12" fill="#654B80">behavior flow</text>
+    <line x1="1187" y1="742" x2="1247" y2="742" stroke="#9FD3F2" stroke-width="3" marker-end="url(#arrow-blue)"/>
+    <rect x="1259" y="714" width="177" height="55" rx="7" fill="#EAF7EF" stroke="#67B98A" stroke-width="2"/>
+    <text x="1347" y="738" text-anchor="middle" font-family="Arial" font-size="15" font-weight="700" fill="#24734A">STOP</text>
+    <text x="1347" y="758" text-anchor="middle" font-family="Arial" font-size="12" fill="#24734A">evidence converges</text>
+  </g>
+</svg>

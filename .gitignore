@@ -1,0 +1,25 @@
+# Local credentials
+.env
+.env.*
+!.env.example
+
+# Experiment outputs and runtime caches
+result/
+newtest/results/
+outputs/
+logs/
+**/tool_cache/
+*.log
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+.DS_Store

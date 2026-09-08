@@ -56,6 +56,19 @@ MYCODE_VLM_IMAGE_TRANSPORT=auto
 运行 SWE Clean15 的 92 个样本：
 
 ```bash
+bash scripts/run_swe_clean15_addtest.sh --env-file .env.provider.local
+```
+
+该脚本封装了论文实验使用的高质量搜索预算。默认生成带时间戳的新 `RUN_ID`。中断后续跑时必须显式复用原 ID：
+
+```bash
+RUN_ID=swe_clean15_addtest_20260908_210000 RESUME=1 \
+  bash scripts/run_swe_clean15_addtest.sh --env-file .env.provider.local
+```
+
+等价的手动配置方式为：
+
+```bash
 set -a
 source configs/runtime/full_mm.env
 set +a

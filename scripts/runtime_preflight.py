@@ -124,18 +124,24 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
     result = collect_runtime_capabilities()
-    missing = [name for name, path in result["commands"].items() if not path]
+    missing = []
+    if not result["commands"].get("git"):
+        missing.append("git")
+    missing_optional = [
+        name for name in ("rg",) if not result["commands"].get(name)
+    ]
     if not result["packages"]["requests"]:
         missing.append("requests")
     if args.require_browser and not result["browser"]["launch_ok"]:
         missing.append("playwright_chromium_runtime")
     result["missing_required"] = missing
+    result["missing_optional"] = missing_optional
     browser_requested = os.environ.get("ALLOW_BROWSER", "0") == "1"
     result["status"] = (
         "error"
         if missing
         else "degraded"
-        if browser_requested and not result["browser"]["launch_ok"]
+        if missing_optional or (browser_requested and not result["browser"]["launch_ok"])
         else "ok"
     )
     if args.json:
@@ -149,6 +155,8 @@ def main() -> int:
             print(f"Browser diagnostic: {result['browser']['error']}")
         if missing:
             print("Missing required capabilities: " + ", ".join(missing))
+        if missing_optional:
+            print("Missing optional capabilities: " + ", ".join(missing_optional))
     return 1 if missing else 0
 
 

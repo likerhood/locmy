@@ -66,6 +66,19 @@ RUN_ID=swe_clean15_addtest_20260908_210000 RESUME=1 \
   bash scripts/run_swe_clean15_addtest.sh --env-file .env.provider.local
 ```
 
+运行 OmniGIRL Clean15 的 458 个样本：
+
+```bash
+bash scripts/run_omni_clean15_addtest.sh --env-file .env.provider.local
+```
+
+启动器依次在 `data/`、仓库同级 `clean_subsets_new/` 和上两级 `clean_subsets_new/` 中寻找数据集。也可以显式指定服务器路径：
+
+```bash
+SAMPLES=/data2/like/clean_subsets_new/omnigirl-full-candidates.clean15.v458.samples.jsonl \
+  bash scripts/run_omni_clean15_addtest.sh --env-file .env.provider.local
+```
+
 等价的手动配置方式为：
 
 ```bash

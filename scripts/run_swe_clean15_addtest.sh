@@ -8,13 +8,50 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/newtest/model_config.sh"
 load_env_defaults "$ROOT/configs/runtime/full_mm.env"
 
+resolve_samples() {
+  local filename="$1"
+  local candidate
+  for candidate in \
+    "$ROOT/data/$filename" \
+    "$ROOT/../clean_subsets_new/$filename" \
+    "$ROOT/../../clean_subsets_new/$filename"
+  do
+    if [[ -f "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  # Preserve a useful error path when the caller has not copied the dataset yet.
+  printf '%s\n' "$ROOT/../clean_subsets_new/$filename"
+}
+
+case "${MAGNET_DATASET_KIND:-swe}" in
+  swe)
+    SAMPLE_FILENAME="swebench_multimodal-full-dev.clean15.samples.jsonl"
+    DEFAULT_DATASET="swebench_multimodal-full-dev-clean15"
+    DEFAULT_RUN_PREFIX="swe_clean15_addtest"
+    AGENT_LAUNCHER="$ROOT/newtest/run_swe_clean15_agent_full.sh"
+    ;;
+  omni)
+    SAMPLE_FILENAME="omnigirl-full-candidates.clean15.v458.samples.jsonl"
+    DEFAULT_DATASET="omnigirl-full-candidates-clean15"
+    DEFAULT_RUN_PREFIX="omni_clean15_addtest"
+    AGENT_LAUNCHER="$ROOT/newtest/run_omni_clean15_agent_full.sh"
+    ;;
+  *)
+    echo "Unsupported MAGNET_DATASET_KIND: ${MAGNET_DATASET_KIND}" >&2
+    exit 2
+    ;;
+esac
+
 export DEEP_AGENT="${DEEP_AGENT:-1}"
 export LIGHTWEIGHT="${LIGHTWEIGHT:-0}"
 export STRUCTURE_ONLY="${STRUCTURE_ONLY:-1}"
 export FULL_MM="${FULL_MM:-1}"
 export MYCODE_BROWSER_REQUIRED="${MYCODE_BROWSER_REQUIRED:-0}"
-export SAMPLES="${SAMPLES:-$ROOT/../../clean_subsets_new/swebench_multimodal-full-dev.clean15.samples.jsonl}"
-export RUN_ID="${RUN_ID:-swe_clean15_addtest_$(date +%Y%m%d_%H%M%S)}"
+export SAMPLES="${SAMPLES:-$(resolve_samples "$SAMPLE_FILENAME")}"
+export DATASET="${DATASET:-$DEFAULT_DATASET}"
+export RUN_ID="${RUN_ID:-${DEFAULT_RUN_PREFIX}_$(date +%Y%m%d_%H%M%S)}"
 export RESUME="${RESUME:-0}"
 
 export VERBOSE_AGENT_LOG="${VERBOSE_AGENT_LOG:-1}"
@@ -83,4 +120,4 @@ export MYCODE_CLOSURE_EXPAND_PER_ROUND="${MYCODE_CLOSURE_EXPAND_PER_ROUND:-2}"
 export MYCODE_PARTIAL_SET_FALLBACK="${MYCODE_PARTIAL_SET_FALLBACK:-1}"
 
 cd "$ROOT"
-exec bash "$ROOT/newtest/run_swe_clean15_agent_full.sh" "$@"
+exec bash "$AGENT_LAUNCHER" "$@"

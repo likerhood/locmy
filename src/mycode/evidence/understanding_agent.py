@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
 from mycode.evidence.agents.planning_agent import plan_evidence_collection
 from mycode.evidence.evidence_agent import build_evidence_packet
-from mycode.evidence.llm_evidence_agent import analyze_evidence_with_llm
+from mycode.evidence.llm_evidence_agent import (
+    analyze_evidence_with_llm,
+    fallback_evidence_analysis,
+)
 from mycode.evidence.runtime.tool_executor import execute_collection_plan
 from mycode.evidence.synthesis import synthesize_evidence
 from mycode.evidence.tools.llm_client import (
@@ -413,6 +417,8 @@ def _execute_tool_rounds(
     use_vlm: bool,
     use_llm: bool,
     max_rounds: int,
+    repo_root: str | Path | None = None,
+    base_commit: str = "",
 ) -> tuple[List[ToolObservation], List[Dict[str, Any]]]:
     observations: List[ToolObservation] = []
     rounds: List[Dict[str, Any]] = []
@@ -431,6 +437,8 @@ def _execute_tool_rounds(
             allow_browser=allow_browser,
             download_images=download_images,
             use_vlm=use_vlm,
+            repo_root=repo_root,
+            base_commit=base_commit,
         )
         observations.extend(round_observations)
         round_trace: Dict[str, Any] = {
@@ -521,6 +529,8 @@ def run_evidence_understanding(
     download_images: bool = True,
     use_vlm: bool = False,
     max_tool_rounds: int = 2,
+    repo_root: str | Path | None = None,
+    base_commit: str = "",
 ) -> Dict[str, Any]:
     if use_llm_planning is None:
         use_llm_planning = use_llm
@@ -538,6 +548,8 @@ def run_evidence_understanding(
             use_vlm=use_vlm,
             use_llm=use_llm,
             max_rounds=max_tool_rounds,
+            repo_root=repo_root,
+            base_commit=base_commit,
         )
     synthesized = synthesize_evidence(
         packet=packet,
@@ -560,12 +572,19 @@ def run_evidence_understanding(
         "evidence_synthesis": synthesized,
     }
     if use_llm:
-        result["llm_understanding"] = analyze_evidence_with_llm(
-            packet,
-            tool_observations=tool_observations if execute_tools else None,
-        )
+        try:
+            result["llm_understanding"] = analyze_evidence_with_llm(
+                packet,
+                tool_observations=tool_observations if execute_tools else None,
+            )
+            result["llm_status"] = "ok"
+        except LLMClientError as exc:
+            result["llm_understanding"] = fallback_evidence_analysis(packet, error=exc)
+            result["llm_status"] = "fallback"
+            result["llm_error"] = str(exc)[:1200]
         result["llm_used"] = True
     else:
         result["llm_understanding"] = None
         result["llm_used"] = False
+        result["llm_status"] = "disabled"
     return result

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict
 
 from mycode.dynamic_retrieval.search_agent import (
@@ -19,7 +18,8 @@ from mycode.evidence.tools.llm_client import (
     model_for_stage,
 )
 from mycode.evidence.understanding_agent import run_evidence_understanding
-from mycode.repo_index.repo_locator import find_repo_structure
+from mycode.repo_index.repo_locator import RepositoryAssetError
+from mycode.repo_index.repository_assets import NO_REPO_ROOT, RepositoryAssets, prepare_repository_assets
 from mycode.repo_index.structure_index import RepositoryIndex
 from mycode.schemas.evidence import NormalizedSample
 from mycode.utils.phase_logger import phase_context, phase_event
@@ -76,6 +76,7 @@ def run_localization_pipeline(
     max_react_steps: int | None = None,
     structure_only: bool = False,
     lightweight: bool = False,
+    auto_fetch_repos: bool = False,
 ) -> Dict[str, Any]:
     phase_event(
         "start",
@@ -86,7 +87,27 @@ def run_localization_pipeline(
         use_vlm=use_vlm,
         structure_only=structure_only,
         lightweight=lightweight,
+        auto_fetch_repos=auto_fetch_repos,
     )
+    asset_error = ""
+    try:
+        assets = prepare_repository_assets(
+            sample,
+            structure_only=structure_only,
+            auto_fetch=auto_fetch_repos,
+        )
+    except RepositoryAssetError as exc:
+        asset_error = str(exc)
+        assets = None
+        phase_event(
+            "error",
+            "repository_assets",
+            error_type=type(exc).__name__,
+            error=asset_error,
+        )
+    structure_path = assets.structure_path if assets else None
+    repo_root = assets.repo_root if assets else NO_REPO_ROOT
+
     with phase_context(
         "evidence_agent",
         use_llm=use_llm,
@@ -96,6 +117,8 @@ def run_localization_pipeline(
         download_images=download_images,
         use_vlm=use_vlm,
         max_tool_rounds=max_tool_rounds,
+        repo_root=str(repo_root or ""),
+        base_commit=assets.base_commit if assets else "",
     ):
         evidence = run_evidence_understanding(
             sample,
@@ -108,10 +131,16 @@ def run_localization_pipeline(
             download_images=download_images,
             use_vlm=use_vlm,
             max_tool_rounds=max_tool_rounds,
+            repo_root=repo_root,
+            base_commit=assets.base_commit if assets else "",
         )
-    structure_path = find_repo_structure(sample.instance_id, sample.dataset) if structure_only else None
-    repo_root = Path("/__mycode_no_repo_root__") if structure_only else None
-    with phase_context("repository_index", structure_only=structure_only, structure_path=str(structure_path or "")):
+    with phase_context(
+        "repository_index",
+        structure_only=structure_only,
+        structure_path=str(structure_path or ""),
+        repo_root=str(repo_root or ""),
+        asset_source=assets.source if assets else "error",
+    ):
         repo_index = RepositoryIndex(
             repo=sample.repo,
             instance_id=sample.instance_id,
@@ -125,6 +154,8 @@ def run_localization_pipeline(
             ready=repo_index.ready,
             file_count=len(repo_index.files),
             entity_count=len(repo_index.entities),
+            asset_source=assets.source if assets else "error",
+            asset_error=asset_error,
         )
     if use_llm_controller is None:
         use_llm_controller = use_llm

@@ -8,11 +8,13 @@ result/
 newtest/results/
 outputs/
 logs/
+.mycode_cache/
 **/tool_cache/
 *.log
 
 # Python environments and caches
 .venv/
+*.egg-info/
 __pycache__/
 *.py[cod]
 .pytest_cache/

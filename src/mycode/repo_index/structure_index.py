@@ -4,6 +4,7 @@ import json
 import re
 import ast
 import math
+import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -12,7 +13,8 @@ from mycode.repo_index.repo_locator import find_repo_root, find_repo_structure
 
 
 TEXT_EXTENSIONS = {
-    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".java", ".c", ".h",
+    ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
+    ".java", ".c", ".h",
     ".css", ".scss", ".less", ".json", ".yaml", ".yml", ".md", ".mdx",
     ".html", ".vue", ".svelte",
 }
@@ -435,6 +437,27 @@ def _flatten_structure_node(path: str, node: Any) -> Iterable[tuple[str, Dict[st
 def _entities_from_structure(path: str, node: Dict[str, Any]) -> list[CodeEntity]:
     text = str(node.get("text") or "")
     lines = text.splitlines()
+    cached_entities = node.get("mycode_entities")
+    if isinstance(cached_entities, list):
+        entities: list[CodeEntity] = []
+        for item in cached_entities:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            start = int(item.get("start_line") or 1)
+            end = int(item.get("end_line") or start)
+            snippet = "\n".join(lines[max(0, start - 1):min(len(lines), end)])
+            entities.append(
+                CodeEntity(
+                    path=path,
+                    kind=str(item.get("kind") or "function"),
+                    name=str(item["name"]),
+                    start_line=start,
+                    end_line=end,
+                    text=snippet,
+                )
+            )
+        return sorted(entities, key=lambda item: (item.start_line, item.kind, item.name))
+
     ext = Path(path).suffix.lower()
     code_lines = (
         _mask_c_style_comments(text).splitlines()
@@ -500,6 +523,70 @@ def _entities_from_structure(path: str, node: Dict[str, Any]) -> list[CodeEntity
         known_names.add((entity.kind, entity.name))
     entities.sort(key=lambda item: (item.start_line, item.kind, item.name))
     return entities
+
+
+def write_repository_structure(
+    repo_root: Path,
+    output_path: Path,
+    *,
+    repo: str,
+    instance_id: str,
+    base_commit: str,
+) -> Path:
+    """Build an atomic, reusable structure snapshot from an exact checkout."""
+    if output_path.exists():
+        return output_path
+
+    structure: Dict[str, Any] = {}
+    for path, source in _iter_repo_files(repo_root):
+        entities = _extract_source_entities(path, source)
+        structure[path] = {
+            "text": source,
+            "classes": [
+                {
+                    "name": entity.name,
+                    "start_line": entity.start_line,
+                    "end_line": entity.end_line,
+                }
+                for entity in entities
+                if entity.kind in {"class", "module"}
+            ],
+            "functions": [
+                {
+                    "name": entity.name,
+                    "start_line": entity.start_line,
+                    "end_line": entity.end_line,
+                }
+                for entity in entities
+                if entity.kind not in {"class", "module"}
+            ],
+            "mycode_entities": [
+                {
+                    "kind": entity.kind,
+                    "name": entity.name,
+                    "start_line": entity.start_line,
+                    "end_line": entity.end_line,
+                }
+                for entity in entities
+            ],
+        }
+
+    payload = {
+        "format": "mycode.repo_structure.v1",
+        "repo": repo,
+        "instance_id": instance_id,
+        "base_commit": base_commit,
+        "structure": structure,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_name(f".{output_path.name}.{os.getpid()}.tmp")
+    try:
+        with temporary.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+        os.replace(temporary, output_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return output_path
 
 
 class RepositoryIndex:

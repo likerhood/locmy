@@ -299,3 +299,20 @@ def analyze_evidence_with_llm(
     parsed["_model"] = response.get("model")
     parsed["_usage"] = response.get("usage")
     return parsed
+
+
+def fallback_evidence_analysis(
+    packet: EvidencePacket,
+    *,
+    error: Exception | str,
+) -> Dict[str, Any]:
+    """Build a traceable deterministic result when evidence synthesis LLM fails."""
+
+    parsed = normalize_llm_evidence_analysis({}, packet)
+    parsed["_llm_response_id"] = None
+    parsed["_model"] = model_for_stage("evidence")
+    parsed["_usage"] = {}
+    parsed["_status"] = "fallback"
+    parsed["_fallback"] = "deterministic_evidence_analysis"
+    parsed["_error"] = str(error)[:1200]
+    return parsed

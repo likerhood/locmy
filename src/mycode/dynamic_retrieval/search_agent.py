@@ -25,6 +25,7 @@ from mycode.flow_analysis.static_slice import trace_static_slices
 from mycode.flow_analysis.statement_flow import trace_statement_flows
 from mycode.dynamic_retrieval.controller import LLMController, decide_next_actions
 from mycode.dynamic_retrieval.candidate_reviewer import review_candidates
+from mycode.dynamic_retrieval.fast_seed_planner import plan_fast_seeds
 from mycode.dynamic_retrieval.navigation_policy import select_navigation_actions, summarize_agent_observation
 from mycode.dynamic_retrieval.react_agent import run_react_tool_agent
 from mycode.dynamic_retrieval.tools import run_four_tool_agent_round
@@ -712,8 +713,8 @@ def _rank_memory_bonus(
 
     max_bonus = _env_float("MYCODE_MEMORY_MAX_BONUS", 24.0, minimum=0.0)
     decay = min(1.0, _env_float("MYCODE_MEMORY_RANK_DECAY", 0.82, minimum=0.0))
-    round_decay = min(1.0, _env_float("MYCODE_MEMORY_ROUND_DECAY", 0.65, minimum=0.0))
-    no_gain_decay = min(1.0, _env_float("MYCODE_MEMORY_NO_GAIN_DECAY", 0.45, minimum=0.0))
+    round_decay = min(1.0, _env_float("MYCODE_MEMORY_ROUND_DECAY", 0.90, minimum=0.0))
+    no_gain_decay = min(1.0, _env_float("MYCODE_MEMORY_NO_GAIN_DECAY", 0.75, minimum=0.0))
     role_multiplier = 1.0
     if path_role in {"reproduction_or_example", "test_or_fixture", "generated_or_lockfile", "addon_bundle"}:
         role_multiplier = min(1.0, _env_float("MYCODE_MEMORY_CONTEXT_ROLE_MULTIPLIER", 0.35, minimum=0.0))
@@ -2050,6 +2051,12 @@ def _should_run_deep_flow(
         return True, "flow_mode_deep"
     if not _env_bool("MYCODE_DEEP_FLOW_AUTO", True):
         return False, "deep_flow_auto_disabled"
+    candidate_limit = _env_int("MYCODE_DEEP_FLOW_CANDIDATE_LIMIT", 32, minimum=1)
+    if candidate_count > candidate_limit:
+        return False, "candidate_pool_too_large_for_deep_flow"
+    obligation_count = len(getattr(issue_sketch, "flow_obligations", []) or [])
+    if obligation_count:
+        return True, "explicit_flow_obligation"
     threshold = _env_float("MYCODE_HIGH_CONFIDENCE_THRESHOLD", 0.78, minimum=0.0)
     axes = confidence.get("axes") or {}
     semantic_program_axes = sum(
@@ -2059,11 +2066,8 @@ def _should_run_deep_flow(
     )
     if float(confidence.get("confidence") or 0.0) >= threshold and semantic_program_axes >= 2:
         return False, "high_confidence_uses_light_flow"
-    if candidate_count > _env_int("MYCODE_DEEP_FLOW_CANDIDATE_LIMIT", 24, minimum=1):
-        return False, "candidate_pool_too_large_for_deep_flow"
-    obligation_count = len(getattr(issue_sketch, "flow_obligations", []) or [])
-    if round_no >= max_rounds or obligation_count:
-        return True, "low_confidence_or_flow_obligation"
+    if round_no >= max_rounds:
+        return True, "low_confidence_final_round"
     return False, "no_deep_flow_trigger"
 
 
@@ -2213,12 +2217,17 @@ def _collect_evidence_seed_paths(evidence_result: Dict[str, Any]) -> set[str]:
                 if candidate and not candidate.startswith("/"):
                     paths.add(_norm_path(candidate))
     for observation in evidence_result.get("tool_observations", []) or []:
-        if observation.get("tool") != "browser_reproduction_reader":
-            continue
-        for source_file in (observation.get("extracted", {}) or {}).get("source_files", []) or []:
-            path = str(source_file.get("path") or "")
+        tool = str(observation.get("tool") or "")
+        extracted = observation.get("extracted", {}) or {}
+        if tool == "github_url_parser" and extracted.get("local_resolution_status") == "resolved":
+            path = str(extracted.get("local_path") or extracted.get("path") or "")
             if path:
                 paths.add(_norm_path(path))
+        if tool == "browser_reproduction_reader":
+            for source_file in extracted.get("source_files", []) or []:
+                path = str(source_file.get("path") or "")
+                if path:
+                    paths.add(_norm_path(path))
     return paths
 
 
@@ -6434,6 +6443,17 @@ def dynamic_localize(
     queries = query_groups.get("all", [])
     phase_timings: list[dict[str, Any]] = []
 
+    fast_seed_plan = plan_fast_seeds(
+        index=index,
+        issue_text=sample.issue_text,
+        query_groups=query_groups,
+        evidence_result=evidence_result,
+        controller_llm=controller_llm,
+    )
+    fast_seed_paths = [path for path in fast_seed_plan.get("seed_files", []) if path in index.files]
+    persistent_seed_paths = [
+        path for path in fast_seed_plan.get("persistent_seed_files", []) if path in index.files
+    ]
     if lightweight:
         with phase_context("dynamic.lightweight_localize", query_count=len(queries), top_k=top_k):
             return _lightweight_dynamic_localize(
@@ -6519,7 +6539,7 @@ def dynamic_localize(
             graph=graph,
             issue_sketch=issue_sketch,
             queries=queries,
-            previous_candidates=[],
+            previous_candidates=fast_seed_paths,
             top_k=top_k,
             max_steps=react_max_steps,
             planner_llm=controller_llm,
@@ -6538,11 +6558,11 @@ def dynamic_localize(
             "step_count": len(react_agent.get("steps", []) or []),
         }
     )
-    react_candidate_paths = [
+    react_candidate_paths = _dedupe(fast_seed_paths + [
         path
         for path in react_agent.get("candidate_paths", [])
-        if path in index.files and _norm_path(path) not in _collect_evidence_seed_paths(evidence_result)
-    ][:top_k]
+        if path in index.files
+    ], limit=top_k)
     # The ReAct loop already invokes SearchAnchor, NavigateCode, TraceFlow and
     # ReadCode. Running the deterministic four-tool bootstrap immediately after
     # it repeats the same repository work and was the main source of long-tail
@@ -6601,15 +6621,24 @@ def dynamic_localize(
     )
     evidence_seed_paths = _collect_evidence_seed_paths(evidence_result)
     bootstrap_candidate_paths = _dedupe(
-        list(react_candidate_paths) + list(bootstrap_agent.get("candidate_paths", [])),
+        list(fast_seed_paths) + list(react_candidate_paths) + list(bootstrap_agent.get("candidate_paths", [])),
         limit=top_k * 2,
     )
     bootstrap_candidate_paths = [
         path
         for path in bootstrap_candidate_paths
-        if path in index.files and _norm_path(path) not in evidence_seed_paths
+        if path in index.files and (_norm_path(path) not in evidence_seed_paths or path in fast_seed_paths)
     ][:top_k]
     search_trace: list[dict[str, Any]] = [
+        {
+            "step": "fast_seed_planner",
+            "strategy": fast_seed_plan.get("strategy"),
+            "candidate_files": fast_seed_plan.get("candidate_files", []),
+            "seed_files": fast_seed_paths,
+            "persistent_seed_files": persistent_seed_paths,
+            "llm_status": fast_seed_plan.get("llm_status"),
+            "evidence": fast_seed_plan.get("evidence", {}),
+        },
         {
             "step": "issue_sketch",
             "strategy": "evidence role understanding before localization",
@@ -6672,14 +6701,20 @@ def dynamic_localize(
 
     rounds: list[DynamicSearchRound] = []
     active_queries = _dedupe(queries + react_agent.get("next_queries", []) + bootstrap_agent.get("next_queries", []))
-    previous_ranked: list[RankedLocation] = [
+    initial_seed_ranking: list[RankedLocation] = [
         RankedLocation(
             path=path,
             score=max(6.0, 16.0 - idx),
-            reasons=["four_tool_bootstrap_candidate"],
+            reasons=["fast_seed_or_bootstrap_candidate"],
+            belief={
+                "fast_seed": path in fast_seed_paths,
+                "persistent_seed": path in persistent_seed_paths,
+                "supporting_axes": (fast_seed_plan.get("evidence", {}).get(path, {}) or {}).get("channels", []),
+            },
         )
         for idx, path in enumerate(bootstrap_candidate_paths)
     ]
+    previous_ranked: list[RankedLocation] = list(initial_seed_ranking)
     previous_flow_traces: list[dict[str, Any]] = _merge_flow_traces(
         react_agent.get("flow_traces", []) or [],
         bootstrap_agent.get("flow_traces", []) or [],
@@ -6913,7 +6948,7 @@ def dynamic_localize(
     )
     ranked, cross_round_frontier = _cross_round_candidate_frontier(
         selected=ranked,
-        round_rankings=[item.ranked_locations for item in rounds],
+        round_rankings=[initial_seed_ranking] + [item.ranked_locations for item in rounds],
         issue_text=sample.issue_text,
         review=merged_candidate_review,
         code_contexts=code_contexts,
@@ -6921,7 +6956,7 @@ def dynamic_localize(
     )
     ranked, precision_rerank = _precision_rerank_locations(
         ranked=ranked,
-        round_rankings=[item.ranked_locations for item in rounds],
+        round_rankings=[initial_seed_ranking] + [item.ranked_locations for item in rounds],
         issue_text=sample.issue_text,
         review=merged_candidate_review,
         code_contexts=code_contexts,

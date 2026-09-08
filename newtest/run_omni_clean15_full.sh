@@ -5,7 +5,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOC_CODE_ROOT="${LOC_CODE_ROOT:-$(cd "$ROOT/../.." && pwd)}"
 SAMPLES="${SAMPLES:-$LOC_CODE_ROOT/clean_subsets_new/omnigirl-full-candidates.clean15.v458.samples.jsonl}"
 DATASET="${DATASET:-omnigirl-full-candidates-clean15}"
-PYTHON_BIN="${PYTHON_BIN:-python3}"
+if [[ -x "$ROOT/.venv/bin/python" ]]; then
+  DEFAULT_PYTHON_BIN="$ROOT/.venv/bin/python"
+else
+  DEFAULT_PYTHON_BIN="python3"
+fi
+PYTHON_BIN="${PYTHON_BIN:-$DEFAULT_PYTHON_BIN}"
 
 # shellcheck disable=SC1091
 source "$ROOT/newtest/model_config.sh"
@@ -149,7 +154,7 @@ echo "Samples: $SAMPLES"
 echo "Dataset: $DATASET"
 echo "Output: $OUTPUT_DIR"
 echo "Model label: $MODEL_LABEL"
-echo "Use LLM: ${USE_LLM:-0}; network/browser/vlm: ${ALLOW_NETWORK:-0}/${ALLOW_BROWSER:-0}/${USE_VLM:-0}; structure_only: ${STRUCTURE_ONLY:-1}; lightweight: ${LIGHTWEIGHT:-1}"
+echo "Use LLM: ${USE_LLM:-0}; network/browser/vlm: ${ALLOW_NETWORK:-0}/${ALLOW_BROWSER:-0}/${USE_VLM:-0}; structure_only: ${STRUCTURE_ONLY:-1}; repo_auto_fetch: ${MYCODE_AUTO_FETCH_REPOS:-1}; lightweight: ${LIGHTWEIGHT:-1}"
 echo "Budgets: top_k=${TOP_K:-15}; dynamic_rounds=${DYNAMIC_ROUNDS:-3}; max_tool_rounds=${MAX_TOOL_ROUNDS:-2}; max_react_steps=${MAX_REACT_STEPS:-auto}; full_mm=${FULL_MM:-0}; download_images=${DOWNLOAD_IMAGES:-0}"
 echo "Deep graph: scope=${MYCODE_DEEP_GRAPH_SCOPE:-120}; prefilter_multiplier=${MYCODE_DEEP_PREFILTER_MULTIPLIER:-8}; same_dir_per_seed=${MYCODE_DEEP_SAME_DIR_PER_SEED:-6}; phase_log=${MYCODE_PHASE_LOG:-1}"
 echo "Deep budgets: pool=${MYCODE_ROUND_POOL_LIMIT:-160}; global_file=${MYCODE_ROUND_GLOBAL_FILE_HITS:-36}; global_entity=${MYCODE_ROUND_GLOBAL_ENTITY_HITS:-60}; read=${MYCODE_ROUND_READ_BUDGET:-auto}; flow_pool=${MYCODE_FLOW_POOL_LIMIT:-80}; flow_limit=${MYCODE_FLOW_TRACE_LIMIT:-6}; graph_seed=${MYCODE_GRAPH_MAX_SEED_NODES:-10}; graph_edges=${MYCODE_GRAPH_MAX_EDGES_PER_SEED:-45}; graph_beam=${MYCODE_GRAPH_BEAM_WIDTH:-80}"
@@ -158,5 +163,18 @@ echo "Deep evidence policy: seed_multiplier=${MYCODE_EVIDENCE_SEED_TARGET_MULTIP
 echo "Candidate convergence: multi_channel=${MYCODE_MULTI_CHANNEL_RECALL:-1}; review=${MYCODE_LLM_CANDIDATE_REVIEW:-0}; review_candidates=${MYCODE_LLM_REVIEW_CANDIDATES:-6}; repair_attempts=${MYCODE_LLM_REVIEW_REPAIR_ATTEMPTS:-1}"
 echo "Terminal trace: verbose_agent_log=${VERBOSE_AGENT_LOG:-0}; verbose_agent_limit=${VERBOSE_AGENT_LIMIT:-5}; verbose_llm_text_limit=${VERBOSE_LLM_TEXT_LIMIT:-500}"
 echo "Sample heartbeat: ${SAMPLE_HEARTBEAT_INTERVAL:-30}s (set SAMPLE_HEARTBEAT_INTERVAL=0 to disable)"
+
+if [[ "${MYCODE_RUNTIME_PREFLIGHT:-1}" == "1" ]]; then
+  preflight_args=(--json)
+  if [[ "${ALLOW_BROWSER:-0}" == "1" && "${MYCODE_BROWSER_REQUIRED:-0}" == "1" ]]; then
+    preflight_args+=(--require-browser)
+  fi
+  if ! "$PYTHON_BIN" "$ROOT/scripts/runtime_preflight.py" "${preflight_args[@]}" > "$OUTPUT_DIR/runtime_capabilities.json"; then
+    cat "$OUTPUT_DIR/runtime_capabilities.json"
+    echo "Runtime preflight failed. Install the reported dependencies or set MYCODE_BROWSER_REQUIRED=0 for an explicitly degraded run." >&2
+    exit 2
+  fi
+  cat "$OUTPUT_DIR/runtime_capabilities.json"
+fi
 
 "$PYTHON_BIN" "$ROOT/newtest/run_clean15_dataset.py" "${args[@]}" 2>&1 | tee "$OUTPUT_DIR/run.log"

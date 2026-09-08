@@ -32,6 +32,92 @@ LIST_FIELDS = {
 TEXT_FIELDS = {"symptom", "expected_actual_difference"}
 
 
+def _infer_image_type(payload: Dict[str, Any], issue_summary: str) -> str:
+    supplied = _as_text(payload.get("image_type")).lower().replace(" ", "_")
+    if supplied:
+        return supplied
+    text = " ".join(
+        [
+            issue_summary,
+            " ".join(_as_list(payload.get("visual_entities"))),
+            _as_text(payload.get("symptom")),
+        ]
+    ).lower()
+    if any(token in text for token in ("traceback", "exception", "error dialog", "stack trace")):
+        return "error_or_diagnostic"
+    if any(token in text for token in ("chart", "plot", "legend", "canvas", "axis")):
+        return "chart_or_canvas"
+    comparison_pairs = (
+        ("before" in text and "after" in text)
+        or ("expected" in text and "actual" in text)
+        or "side by side" in text
+        or "difference view" in text
+    )
+    if comparison_pairs:
+        return "comparison"
+    if any(token in text for token in ("code", "terminal", "console", "editor")):
+        return "code_or_console"
+    return "ui_screenshot"
+
+
+def _visual_graph(payload: Dict[str, Any], issue_summary: str) -> Dict[str, Any]:
+    image_type = _infer_image_type(payload, issue_summary)
+    supplied_nodes = payload.get("nodes") if isinstance(payload.get("nodes"), list) else []
+    supplied_edges = payload.get("edges") if isinstance(payload.get("edges"), list) else []
+    nodes: list[dict[str, str]] = []
+    for index, item in enumerate(supplied_nodes[:40], start=1):
+        if isinstance(item, dict):
+            label = _as_text(item.get("label") or item.get("text") or item.get("name"))
+            if label:
+                nodes.append(
+                    {
+                        "id": _as_text(item.get("id"), f"node_{index}"),
+                        "type": _as_text(item.get("type"), "visual_entity"),
+                        "label": label[:240],
+                    }
+                )
+    if not nodes:
+        for index, label in enumerate(_as_list(payload.get("visual_entities"))[:20], start=1):
+            nodes.append({"id": f"entity_{index}", "type": "visual_entity", "label": label[:240]})
+        offset = len(nodes)
+        for index, label in enumerate(_as_list(payload.get("visible_text"))[:20], start=1):
+            nodes.append({"id": f"text_{index}", "type": "visible_text", "label": label[:240]})
+        symptom = _as_text(payload.get("symptom"))
+        if symptom:
+            nodes.append({"id": "symptom", "type": "observed_symptom", "label": symptom[:300]})
+
+    node_ids = {item["id"] for item in nodes}
+    edges: list[dict[str, str]] = []
+    for item in supplied_edges[:60]:
+        if not isinstance(item, dict):
+            continue
+        source = _as_text(item.get("source"))
+        target = _as_text(item.get("target"))
+        if source in node_ids and target in node_ids:
+            edges.append(
+                {
+                    "source": source,
+                    "target": target,
+                    "type": _as_text(item.get("type"), "related_to"),
+                }
+            )
+    if not edges and "symptom" in node_ids:
+        edges = [
+            {"source": item["id"], "target": "symptom", "type": "supports"}
+            for item in nodes
+            if item["id"] != "symptom"
+        ][:30]
+    roots = _as_list(payload.get("root_objects"))[:12]
+    if not roots:
+        roots = [item["id"] for item in nodes if item["type"] == "visual_entity"][:6]
+    return {
+        "image_type": image_type,
+        "root_objects": roots,
+        "nodes": nodes[:40],
+        "edges": edges[:60],
+    }
+
+
 def _as_list(value: Any) -> list[str]:
     if value is None:
         return []
@@ -101,10 +187,12 @@ def normalize_vlm_analysis(
     payload["likely_code_layers"] = list(dict.fromkeys(payload["likely_code_layers"]))[:40]
     payload["search_queries"] = list(dict.fromkeys(payload["search_queries"]))[:60]
     payload["cautions"] = list(dict.fromkeys(payload["cautions"]))[:40]
+    payload["visual_ir"] = _visual_graph(payload, issue_summary)
+    payload["image_type"] = payload["visual_ir"]["image_type"]
     payload["image_format"] = image_format
     payload["repo"] = repo
     payload["local_path"] = str(local_path) if local_path else payload.get("local_path")
-    payload["schema_version"] = "vlm_image_understanding.v2"
+    payload["schema_version"] = "vlm_image_understanding.v3"
     return payload
 
 
@@ -196,7 +284,20 @@ def _image_transport() -> str:
 
 def _transport_fallback_allowed(exc: LLMClientError) -> bool:
     text = str(exc).lower()
-    return any(status in text for status in ("http 400", "http 415", "http 422"))
+    return any(
+        marker in text
+        for marker in (
+            "http 400",
+            "http 415",
+            "http 422",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "chunkedencodingerror",
+            "response ended prematurely",
+        )
+    )
 
 
 def _vlm_messages(*, uri: str, issue_summary: str, repo: str) -> list[dict[str, Any]]:
@@ -220,7 +321,9 @@ def _vlm_messages(*, uri: str, issue_summary: str, repo: str) -> list[dict[str, 
                     "text": (
                         "Analyze this issue image and return these JSON fields: visible_text, "
                         "visual_entities, symptom, expected_actual_difference, likely_code_layers, "
-                        "search_queries, cautions. Keep each field concise and evidence-grounded.\n"
+                        "search_queries, cautions, image_type, root_objects, nodes, edges. "
+                        "Nodes and edges should capture only issue-relevant visual structure. Keep each "
+                        "field concise and evidence-grounded.\n"
                         f"repo={repo}\nissue_summary={issue_summary}"
                     ),
                 },
@@ -313,7 +416,17 @@ def try_analyze_image_with_vlm(**kwargs: Any) -> Dict[str, Any]:
         result["vlm_status"] = "ok"
         return result
     except (LLMClientError, OSError, ValueError) as exc:
-        return {
-            "vlm_status": "failed",
-            "error": str(exc),
-        }
+        fallback = heuristic_image_understanding(
+            image_format=str(kwargs.get("image_format") or ""),
+            issue_summary=str(kwargs.get("issue_summary") or ""),
+            repo=str(kwargs.get("repo") or ""),
+            local_path=kwargs.get("image_path"),
+        )
+        fallback.update(
+            {
+                "vlm_status": "failed",
+                "fallback": "heuristic_image_understanding",
+                "error": str(exc)[:1200],
+            }
+        )
+        return fallback

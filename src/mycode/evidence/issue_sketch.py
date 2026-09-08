@@ -569,26 +569,54 @@ def _evidence_roles(packet: dict[str, Any], tool_observations: list[dict[str, An
         tool = str(observation.get("tool") or "")
         extracted = observation.get("extracted", {}) or {}
         if tool == "browser_reproduction_reader":
+            browser_used = bool(extracted.get("browser_used"))
+            runtime_trace = extracted.get("runtime_trace", {}) or {}
+            source_files = extracted.get("source_files", []) or []
+            success = bool(observation.get("success"))
+            if browser_used and runtime_trace:
+                role = "Executable reproduction observation"
+                navigation_value = "high"
+                reason = "A live browser produced a runtime trace for the reproduction."
+            elif success and (source_files or extracted.get("parsed_reproduction")):
+                role = "Static reproduction evidence"
+                navigation_value = "medium"
+                reason = "The reproduction was decoded statically, without verified browser execution."
+            else:
+                role = "Unavailable reproduction reference"
+                navigation_value = "low"
+                reason = "The reproduction tool produced no verified runtime or source evidence."
             _add_role(
                 roles,
                 source=str(observation.get("source") or tool),
-                role="Executable reproduction observation",
+                role=role,
                 evidence_type="tool_observation",
-                navigation_value="high",
+                navigation_value=navigation_value,
                 modification_prior="low",
-                reason="Browser/playground artifacts describe inputs, config, console and UI behavior.",
-                metadata={"semantic_queries": extracted.get("semantic_queries", []) or extracted.get("parsed_reproduction", {})},
+                reason=reason,
+                metadata={
+                    "semantic_queries": extracted.get("semantic_queries", []) or extracted.get("parsed_reproduction", {}),
+                    "browser_used": browser_used,
+                    "network_used": bool(extracted.get("network_used")),
+                    "runtime_trace_present": bool(runtime_trace),
+                    "source_file_count": len(source_files),
+                    "status": observation.get("status"),
+                },
             )
         if tool == "vlm_image_inspector":
+            vlm_status = str(extracted.get("vlm_status") or "")
             _add_role(
                 roles,
                 source=str(observation.get("source") or tool),
                 role="VLM visual analysis",
                 evidence_type="tool_observation",
-                navigation_value="high",
+                navigation_value="high" if vlm_status == "ok" else "medium",
                 modification_prior="low",
                 reason="VLM image understanding should be translated to workflow/effect queries.",
-                metadata=extracted.get("vlm_analysis", {}) or extracted,
+                metadata={
+                    **(extracted.get("vlm_analysis", {}) or extracted),
+                    "vlm_status": vlm_status or "unknown",
+                    "processable": bool(extracted.get("processable")),
+                },
             )
 
     return roles, hints, seed_policy

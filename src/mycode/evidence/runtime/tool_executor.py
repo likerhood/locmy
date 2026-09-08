@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from mycode.evidence.tools.browser_reproduction_reader import read_browser_reproduction
 from mycode.evidence.tools.image_asset_reader import read_image_asset
+from mycode.evidence.tools.local_code_url_resolver import resolve_github_code_url
 from mycode.evidence.tools.reproduction_extractor import extract_reproduction
 from mycode.evidence.tools.url_inspector import inspect_url
 from mycode.evidence.tools.vlm_image_reader import try_analyze_image_with_vlm
@@ -48,6 +49,9 @@ def execute_tool_request(
     allow_browser: bool = False,
     download_images: bool = True,
     use_vlm: bool = False,
+    repo_root: str | Path | None = None,
+    base_commit: str = "",
+    expected_repo: str = "",
 ) -> ToolObservation:
     root = Path(cache_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -81,7 +85,16 @@ def execute_tool_request(
 
     try:
         if request.tool in {"github_url_parser", "leakage_url_filter"}:
-            extracted = inspect_url(request.source)
+            extracted = (
+                resolve_github_code_url(
+                    request.source,
+                    repo_root=repo_root,
+                    expected_repo=expected_repo or (plan.repo if plan else ""),
+                    base_commit=base_commit,
+                )
+                if request.tool == "github_url_parser"
+                else inspect_url(request.source)
+            )
             status = "ok" if request.tool != "leakage_url_filter" else "skipped_leakage_url"
             return ToolObservation(
                 tool=request.tool,
@@ -155,6 +168,8 @@ def execute_tool_request(
                 )
                 extracted["vlm_analysis"] = vlm_result
                 extracted["vlm_status"] = vlm_result.get("vlm_status", "unknown")
+                if extracted["vlm_status"] != "ok":
+                    warnings.append("vlm_failed_using_heuristic_image_evidence")
             else:
                 warnings.append("vlm_semantic_image_understanding_not_yet_executed")
                 heuristic = heuristic_image_understanding(
@@ -166,11 +181,14 @@ def execute_tool_request(
                 extracted["vlm_analysis"] = heuristic
                 extracted["vlm_status"] = heuristic.get("vlm_status", "heuristic_only")
             extracted["planned_vlm_task"] = request.expected_outputs
+            observation_status = str(extracted.get("status", "unknown"))
+            if use_vlm and extracted.get("processable") and extracted.get("vlm_status") != "ok":
+                observation_status = "partial_vlm_fallback"
             return ToolObservation(
                 tool=request.tool,
                 source=request.source,
                 success=extracted.get("status") == "ok",
-                status=str(extracted.get("status", "unknown")),
+                status=observation_status,
                 extracted=extracted,
                 warnings=warnings,
                 cache_path=extracted.get("local_path"),
@@ -209,6 +227,8 @@ def execute_collection_plan(
     allow_browser: bool = False,
     download_images: bool = True,
     use_vlm: bool = False,
+    repo_root: str | Path | None = None,
+    base_commit: str = "",
 ) -> List[ToolObservation]:
     root = Path(cache_dir)
     observations: List[ToolObservation] = []
@@ -223,6 +243,9 @@ def execute_collection_plan(
                 allow_browser=allow_browser,
                 download_images=download_images,
                 use_vlm=use_vlm,
+                repo_root=repo_root,
+                base_commit=base_commit,
+                expected_repo=plan.repo,
             )
         )
     return observations

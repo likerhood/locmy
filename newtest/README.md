@@ -7,8 +7,12 @@
 - SWE Clean15: `/home/like/locCode/clean_subsets_new/swebench_multimodal-full-dev.clean15.samples.jsonl`，92 条。
 - OmniGIRL Clean15: `/home/like/locCode/clean_subsets_new/omnigirl-full-candidates.clean15.v458.samples.jsonl`，458 条。
 
-默认不开真实网络、浏览器、VLM、LLM，先跑确定性的 evidence parsing + 三层定位评估。
-默认 `STRUCTURE_ONLY=1`，只使用 benchmark 的 `repo_structures`，避免全量测试时反复扫描超大的本地仓库。
+默认关闭 evidence 阶段的网页网络、浏览器、VLM 和 LLM，先跑确定性的 evidence parsing
+以及三层定位评估。仓库资产下载由独立的 `MYCODE_AUTO_FETCH_REPOS` 控制，默认仅在本地
+结构与 checkout 都缺失时启用。
+默认 `STRUCTURE_ONLY=1`，优先复用 benchmark 已有的 `repo_structures`。如果把
+`mycode` 独立移出当前多项目目录且结构文件缺失，runner 会按样本中的 `repo` 和
+`base_commit` 首次下载精确版本、生成结构快照并写入 `.mycode_cache/`；后续运行直接复用。
 默认 `LIGHTWEIGHT=1`，使用适合 92/458 全量扫描的快速检索模式：不会构建昂贵的深度仓库图，也不会跑多轮 flow；输出仍包含 file/module/function 的 `acc@1/3/5/8/10/12/13/15`、`MRR@15`、`MAP@15`。
 
 ## 先跑小样本冒烟
@@ -164,6 +168,34 @@ bash newtest/run_swe_clean15_full.sh
 - `ALLOW_NETWORK=1`: 允许 URL/docs/playground 抓取。
 - `ALLOW_BROWSER=1`: 允许浏览器工具。
 - `DOWNLOAD_IMAGES=1 USE_VLM=1`: 下载图片并调用 VLM 分析。
+
+## 独立仓库模式
+
+仓库资产的解析顺序为：外部已有 `repo_structures`、`mycode` 自有结构缓存、目标
+`base_commit` 的现有 checkout、首次下载。这个顺序保证当前 LocAgent/MM-IR 等目录仍
+可直接复用，不会因为启用独立模式而重新下载。
+
+```dotenv
+MYCODE_AUTO_FETCH_REPOS=1
+MYCODE_REPO_CACHE_DIR=.mycode_cache
+MYCODE_REPO_REMOTE_TEMPLATE=https://github.com/{repo}.git
+```
+
+首次运行需要系统已安装 `git` 且能够访问仓库远端。下载使用样本的 `base_commit`，
+不会读取 `patch`、`files` 等 gold 字段来生成结构。缓存包含共享 Git 对象、按 commit
+隔离的 detached checkout，以及按数据集/样本保存的结构 JSON。若需要严格离线运行或
+检查资产完整性，可设置 `MYCODE_AUTO_FETCH_REPOS=0`，此时缺失资产会产生
+`missing_repo_index`，不会悄悄定位到错误 commit。
+
+也可直接控制 runner：
+
+```bash
+# 默认行为：缺失时自动获取
+bash newtest/run_swe_clean15_full.sh
+
+# 完全禁止仓库下载
+MYCODE_AUTO_FETCH_REPOS=0 bash newtest/run_swe_clean15_full.sh
+```
 
 每个输出目录包含：
 

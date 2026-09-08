@@ -34,6 +34,13 @@ SET_CUTOFFS = ("8", "10", "15", "all")
 SET_FIELDS = ("sl", "rec", "pre", "f1")
 
 
+def _env_enabled(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"", "0", "false", "no", "off"}
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run mycode evidence-aware dynamic localization on a Clean15 JSONL dataset."
@@ -63,7 +70,24 @@ def _parse_args() -> argparse.Namespace:
         default=0,
         help="Maximum ReAct controller tool steps. 0 derives it from dynamic-rounds.",
     )
-    parser.add_argument("--structure-only", action="store_true", help="Use repo_structures only; avoid scanning full checked-out repos.")
+    parser.add_argument(
+        "--structure-only",
+        action="store_true",
+        help="Use a reusable repo structure snapshot; generate it from base_commit when missing.",
+    )
+    parser.set_defaults(auto_fetch_repos=_env_enabled("MYCODE_AUTO_FETCH_REPOS", True))
+    parser.add_argument(
+        "--auto-fetch-repos",
+        dest="auto_fetch_repos",
+        action="store_true",
+        help="Download an exact repo/base_commit checkout when no reusable structure exists (default).",
+    )
+    parser.add_argument(
+        "--no-auto-fetch-repos",
+        dest="auto_fetch_repos",
+        action="store_false",
+        help="Require pre-existing repository assets; never download repositories.",
+    )
     parser.add_argument("--lightweight", action="store_true", help="Use fast full-run localization without deep graph/flow rounds.")
     parser.add_argument("--cache-dir", default="", help="Tool cache dir. Defaults to <output-dir>/tool_cache.")
     parser.add_argument("--trace-jsonl", default="", help="Compact agent trace JSONL. Defaults to <output-dir>/agent_traces.jsonl.")
@@ -960,7 +984,7 @@ def _write_summary_md(path: Path, summary: dict[str, Any], args: argparse.Namesp
             "## mycode Run Details",
             "",
             f"- Model label: `{model_label}`",
-            f"- Settings: `top_k={args.top_k}`, `dynamic_rounds={args.dynamic_rounds}`, `max_tool_rounds={args.max_tool_rounds}`, `sample_timeout_seconds={args.sample_timeout_seconds}`, `structure_only={args.structure_only}`, `lightweight={args.lightweight}`",
+            f"- Settings: `top_k={args.top_k}`, `dynamic_rounds={args.dynamic_rounds}`, `max_tool_rounds={args.max_tool_rounds}`, `sample_timeout_seconds={args.sample_timeout_seconds}`, `structure_only={args.structure_only}`, `auto_fetch_repos={getattr(args, 'auto_fetch_repos', True)}`, `lightweight={args.lightweight}`",
             "",
             "## Output Files",
             "",
@@ -1066,7 +1090,7 @@ def main() -> None:
         "Switches: "
         f"use_llm={args.use_llm}, planning={args.use_llm_planning}, controller={args.use_llm_controller}, "
         f"network={args.allow_network}, browser={args.allow_browser}, vlm={args.use_vlm}, "
-        f"download_images={args.download_images}, structure_only={args.structure_only}, lightweight={args.lightweight}",
+        f"download_images={args.download_images}, structure_only={args.structure_only}, auto_fetch_repos={args.auto_fetch_repos}, lightweight={args.lightweight}",
         flush=True,
     )
     print(
@@ -1155,6 +1179,7 @@ def main() -> None:
                     max_react_steps=args.max_react_steps or None,
                     structure_only=args.structure_only,
                     lightweight=args.lightweight,
+                    auto_fetch_repos=args.auto_fetch_repos,
                 )
             heartbeat.stop()
             result_status = str(result.get("status") or "ok")
@@ -1309,6 +1334,7 @@ def main() -> None:
         "dynamic_rounds": args.dynamic_rounds,
         "max_react_steps": args.max_react_steps or "auto",
         "structure_only": args.structure_only,
+        "auto_fetch_repos": args.auto_fetch_repos,
         "lightweight": args.lightweight,
         "verbose_agent_log": args.verbose_agent_log,
         "verbose_agent_limit": args.verbose_agent_limit,

@@ -2,6 +2,10 @@
 
 This directory contains the first prototype for the new localization framework.
 
+For a reproducible standalone installation, provider configuration, browser
+preflight, and the standard 92-sample command, see
+[docs/INSTALLATION.md](docs/INSTALLATION.md).
+
 The current implementation now covers the first runnable vertical slice:
 
 - load Clean15 benchmark samples

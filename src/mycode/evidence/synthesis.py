@@ -42,6 +42,11 @@ def _queries_from_observation(observation: ToolObservation) -> Dict[str, List[st
     if observation.tool == "github_url_parser":
         if extracted.get("path"):
             groups["url_seed"].append(str(extracted["path"]))
+        if extracted.get("local_path"):
+            groups["local_code"].append(str(extracted["local_path"]))
+        if extracted.get("symbol_hint"):
+            groups["symbol"].append(str(extracted["symbol_hint"]))
+        groups["symbol"].extend(extracted.get("semantic_terms", []) or [])
         if extracted.get("repo"):
             groups["url_seed"].append(str(extracted["repo"]))
         if extracted.get("line"):
@@ -142,6 +147,10 @@ def synthesize_evidence(
                 "queries": {key: value[:8] for key, value in obs_queries.items() if value},
                 "warnings": obs.warnings[:5],
                 "errors": obs.errors[:3],
+                "provenance": (obs.extracted or {}).get("provenance"),
+                "local_resolution_status": (obs.extracted or {}).get("local_resolution_status"),
+                "browser_used": bool((obs.extracted or {}).get("browser_used")),
+                "network_used": bool((obs.extracted or {}).get("network_used")),
             }
         )
 

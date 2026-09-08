@@ -221,7 +221,7 @@ def test_vlm_analysis_normalizer_backfills_queries_and_schema():
         local_path="/tmp/chart.png",
     )
 
-    assert normalized["schema_version"] == "vlm_image_understanding.v2"
+    assert normalized["schema_version"] == "vlm_image_understanding.v3"
     assert normalized["image_format"] == "png"
     assert normalized["local_path"] == "/tmp/chart.png"
     assert normalized["search_queries"]

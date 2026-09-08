@@ -1,0 +1,11 @@
+name: magnet
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - git
+  - pip
+  - ripgrep
+  - pip:
+      - -r requirements.lock
+      - -e . --no-deps

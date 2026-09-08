@@ -115,7 +115,16 @@ def test_pipeline_evaluates_checkpoint_after_timeout(monkeypatch) -> None:
             pass
 
     monkeypatch.setattr(pipeline, "run_evidence_understanding", lambda *_args, **_kwargs: {})
-    monkeypatch.setattr(pipeline, "find_repo_structure", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        pipeline,
+        "prepare_repository_assets",
+        lambda *_args, **_kwargs: pipeline.RepositoryAssets(
+            repo_root=pipeline.NO_REPO_ROOT,
+            structure_path=None,
+            source="test",
+            base_commit="",
+        ),
+    )
     monkeypatch.setattr(pipeline, "RepositoryIndex", _ReadyIndex)
     monkeypatch.setattr(pipeline, "clear_dynamic_localization_checkpoint", lambda _instance_id: None)
     monkeypatch.setattr(

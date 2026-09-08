@@ -6,6 +6,7 @@ from pathlib import Path
 from mycode.data.dataset_loader import load_samples
 from mycode.evidence.agents.planning_agent import plan_evidence_collection
 from mycode.evidence.understanding_agent import run_evidence_understanding
+from mycode.evidence.tools.llm_client import LLMClientError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +73,27 @@ def test_chartjs_first_step_with_llm_generates_issue_understanding():
     assert "onleave" in text or "leave" in text
     assert "codesandbox" in text
     assert "gold_files" not in text
+
+
+def test_evidence_understanding_falls_back_when_final_llm_call_fails(monkeypatch):
+    def fail_understanding(*args, **kwargs):
+        raise LLMClientError("HTTP 500: temporary provider failure")
+
+    monkeypatch.setattr(
+        "mycode.evidence.understanding_agent.analyze_evidence_with_llm",
+        fail_understanding,
+    )
+    result = run_evidence_understanding(
+        _load_chartjs_10301(),
+        use_llm=True,
+        use_llm_planning=False,
+    )
+
+    assert result["llm_used"] is True
+    assert result["llm_status"] == "fallback"
+    assert result["llm_understanding"]["_fallback"] == "deterministic_evidence_analysis"
+    assert result["llm_understanding"]["issue_sketch"]["concern"]
+    assert "HTTP 500" in result["llm_error"]
 
 
 if __name__ == "__main__":

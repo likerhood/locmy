@@ -86,7 +86,7 @@ def test_path_probe_and_round_memory_are_bounded(monkeypatch: pytest.MonkeyPatch
     assert _rank_memory_bonus(0) == pytest.approx(24.0)
     assert _rank_memory_bonus(1) == pytest.approx(12.0)
     assert _rank_memory_bonus(10) < 0.1
-    assert _rank_memory_bonus(0, no_gain_rounds=2) == pytest.approx(24.0 * 0.45 * 0.45)
+    assert _rank_memory_bonus(0, no_gain_rounds=2) == pytest.approx(24.0 * 0.75 * 0.75)
     assert _rank_memory_bonus(0, path_role="reproduction_or_example") == pytest.approx(24.0 * 0.35)
 
 

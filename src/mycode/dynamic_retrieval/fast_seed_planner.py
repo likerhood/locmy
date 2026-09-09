@@ -88,6 +88,7 @@ def _parse_selected_paths(
                 "role": str(entry.get("role") or "responsibility_candidate"),
                 "evidence_channels": [str(value) for value in entry.get("evidence_channels", []) or []][:6],
                 "expected_mechanism": str(entry.get("expected_mechanism") or "")[:300],
+                "verification_query": str(entry.get("verification_query") or "")[:240],
             }
         else:
             path = str(entry or "")
@@ -191,21 +192,32 @@ def plan_fast_seeds(
                 f"| symbols={','.join(entities_by_path[path]) or 'none'}"
             )
         prompt = (
-            "Select the files that are the strongest entry points for repository-level issue localization.\n"
-            "Use only exact paths from Candidate Files. Prefer implementation files supported by explicit "
-            "symbols, paths, workflow semantics, or multiple independent channels. Images and reproduction "
-            "URLs describe symptoms and are not direct patch evidence by themselves. Return compact JSON only.\n\n"
+            "You are the global repository entry-point selector. Select responsibility entry points from "
+            "Candidate Files using only exact paths and the supplied channel and symbol facts. This stage "
+            "does not verify a patch mechanism. Do not claim that a file contains behavior that has not been read.\n"
+            "Prefer editable implementation files supported by independent path, symbol, workflow, or local-code "
+            "evidence. Treat images and reproduction URLs as navigation evidence only. Generated artifacts, "
+            "bundles, demos, tests, and docs are navigation-only unless the issue explicitly targets them.\n"
+            "Rank files by edit responsibility, not lexical similarity. Return compact JSON only.\n\n"
             f"Issue:\n{issue_text[:5000]}\n\nCandidate Files:\n" + "\n".join(summaries) +
-            "\n\nChoose responsibility candidates, not guaranteed patch targets. "
+            "\n\nChoose responsibility candidates that should be source-verified next. "
             f"Return at most {shortlist_limit} entries using this schema: "
             '{"seed_files":[{"path":"exact/path","role":"implementation|supporting|navigation",'
             '"evidence_channels":["symbol","path","visual","workflow"],'
-            '"expected_mechanism":"short hypothesis"}]}.'
+            '"verification_query":"specific symbol or behavior to verify"}]}.'
         )
         try:
             selected, selection_metadata = _parse_selected_paths(
                 controller_llm(prompt), set(candidate_files)
             )
+            for path, metadata in selection_metadata.items():
+                metadata["evidence_channels"] = [
+                    channel
+                    for channel in metadata.get("evidence_channels", [])
+                    if channel in channels[path]
+                ]
+                if metadata.get("role") not in {"implementation", "supporting", "navigation"}:
+                    metadata["role"] = "navigation"
             selected = selected[:shortlist_limit]
             llm_status = "ok" if selected else "invalid_or_empty"
         except Exception as exc:  # noqa: BLE001 - deterministic order is the fallback.

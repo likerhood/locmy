@@ -126,6 +126,80 @@ def test_candidate_review_keeps_supported_entities_when_one_is_invented() -> Non
     assert candidate["unsupported_entities"] == [{"kind": "function", "name": "inventedHelper"}]
 
 
+def test_candidate_review_uses_compact_evidence_ids_and_stage_token_budget(monkeypatch) -> None:
+    monkeypatch.setenv("MYCODE_CANDIDATE_REVIEW_MAX_TOKENS", "1200")
+    calls: list[tuple[str, int]] = []
+
+    def fake_llm(prompt: str, *, max_tokens: int):
+        calls.append((prompt, max_tokens))
+        return {
+            "content": (
+                '{"selected_head":"src/parser.js","reviews":['
+                '{"path":"src/parser.js","verdict":"verified","confidence":0.93,'
+                '"snippet_id":"C1S1","entity_id":"C1E1","flow_id":"F1",'
+                '"causal_chain":"tokenize drops empty input before parser output",'
+                '"rejection_code":"none"}],"continue_search":false,'
+                '"missing_evidence":[],"next_queries":[]}'
+            )
+        }
+
+    review = review_candidates(
+        llm=fake_llm,
+        issue_text="The tokenizer must preserve empty input.",
+        issue_sketch=_Sketch(),
+        ranked=[RankedLocation(path="src/parser.js", score=90.0)],
+        code_contexts=[
+            {
+                "path": "src/parser.js",
+                "entities": [{"kind": "function", "name": "tokenize"}],
+                "snippets": [{"text": "function tokenize(input) { return input.filter(Boolean); }"}],
+            }
+        ],
+        flow_traces=[
+            {
+                "flow_type": "parser_tokenizer_flow",
+                "candidate_target_paths": ["src/parser.js"],
+            }
+        ],
+        round_no=1,
+    )
+
+    assert calls and calls[0][1] == 1200
+    assert "Use snippet_id, entity_id, and flow_id exactly as supplied" in calls[0][0]
+    assert review["prompt_schema"] == "evidence_ids_v2"
+    assert review["selected_head"] == "src/parser.js"
+    assert review["candidates"][0]["mechanism_verified"] is True
+    assert review["continue_search"] is False
+
+
+def test_candidate_review_rejects_compact_head_with_unknown_flow_id() -> None:
+    review = review_candidates(
+        llm=lambda _prompt: (
+            '{"selected_head":"src/parser.js","reviews":['
+            '{"path":"src/parser.js","verdict":"verified","confidence":0.99,'
+            '"snippet_id":"C1S1","entity_id":"C1E1","flow_id":"F99",'
+            '"causal_chain":"claimed chain","rejection_code":"none"}],'
+            '"continue_search":false,"missing_evidence":[],"next_queries":[]}'
+        ),
+        issue_text="The tokenizer must preserve empty input.",
+        issue_sketch=_Sketch(),
+        ranked=[RankedLocation(path="src/parser.js", score=90.0)],
+        code_contexts=[
+            {
+                "path": "src/parser.js",
+                "entities": [{"kind": "function", "name": "tokenize"}],
+                "snippets": [{"text": "function tokenize(input) { return input; }"}],
+            }
+        ],
+        flow_traces=[],
+        round_no=1,
+    )
+
+    assert review["selected_head"] is None
+    assert review["candidates"][0]["mechanism_verified"] is False
+    assert review["continue_search"] is True
+
+
 def test_candidate_review_reuses_unchanged_source_evidence() -> None:
     calls = 0
 
@@ -1230,6 +1304,19 @@ def test_controller_accepts_wrapped_json_array() -> None:
     assert len(parsed) == 1
     assert parsed[0].tool == "SearchAnchor"
     assert parsed[0].source == "llm"
+
+
+def test_controller_limits_llm_plan_to_two_actions() -> None:
+    payload = [
+        {
+            "tool": "SearchAnchor",
+            "mode": "concern",
+            "reason": f"resolve gap {index}",
+            "queries": [f"query {index}"],
+        }
+        for index in range(3)
+    ]
+    assert len(_parse_llm_decisions(json.dumps(payload))) == 2
 
 
 def test_react_enforces_four_tool_coverage(monkeypatch) -> None:

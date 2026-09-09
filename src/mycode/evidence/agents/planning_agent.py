@@ -212,8 +212,10 @@ def _llm_planning(sketch: EvidenceSketch, plan: EvidenceCollectionPlan, max_toke
                 "decide which tools should process URLs, images, reproduction entry points, and code "
                 "snippets, and to state the evidence-handling rationale. Treat PR, commit, and diff "
                 "URLs as high-risk leakage and mark them to be skipped. A GitHub code URL is only an "
-                "evidence seed, not an automatic patch target. Return one compact JSON object only, "
-                "with no Markdown, preamble, or hidden chain-of-thought. Write generated prose and "
+                "evidence seed, not an automatic patch target. Do not invent repository paths, source symbols, "
+                "selectors, handlers, or routes. URL syntax and external reproduction source are evidence "
+                "provenance, not target-repository semantics. Return one compact JSON object only, with no "
+                "Markdown, preamble, or hidden chain-of-thought. Write generated prose and "
                 "search queries in English; preserve source text, paths, URLs, and identifiers verbatim."
             ),
         },

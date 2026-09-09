@@ -143,11 +143,11 @@ def _planner_prompt(
     step_no: int,
     history: list[dict[str, Any]],
 ) -> str:
-    used_tools = [str(item.get("tool") or "") for item in history]
-    missing_tools = [tool for tool in ("SearchAnchor", "NavigateCode", "TraceFlow", "ReadCode") if tool not in used_tools]
+    completed_signatures = [str(item.get("action_signature") or "") for item in history if item.get("action_signature")]
     return (
-        "You are a code localization controller. Decide the next tool move.\n"
-        "Return compact JSON with keys: thought, tool, mode, queries, stop.\n"
+        "You are the evidence-gap controller for repository issue localization. Choose exactly one action "
+        "that resolves the highest-priority missing evidence, or stop when no required gap remains.\n"
+        "Return compact JSON with keys: tool, mode, queries, resolves_gap, decision_basis, stop, stop_reason.\n"
         "Available tools: SearchAnchor, NavigateCode, TraceFlow, ReadCode.\n"
         "SearchAnchor finds concern/entity/effect anchors.\n"
         "NavigateCode modes: concern, call, used_by.\n"
@@ -155,9 +155,12 @@ def _planner_prompt(
         "ReadCode reads pruned candidate files.\n\n"
         "Visual implementation details are hypotheses until ReadCode confirms them; do not search invented CSS selectors, HTML tags, or conditions.\n"
         "For feature requests, an execution path may not exist yet. Search analogous existing capabilities, ownership/configuration components, action types, reducers, and data-layer handlers.\n"
-        "After every observation, explicitly abandon unsupported hypotheses and choose queries that add new information.\n"
-        "Do not repeat a tool unless its previous observation was empty or a concrete missing-evidence question requires it.\n"
-        "Before stopping, normally cover anchor search, graph navigation, flow validation, and focused code reading.\n\n"
+        "Use ReadCode when the leading candidate lacks source verification. Use TraceFlow only when both endpoints "
+        "are grounded in observed source entities. Do not expand from navigation-only, generated, test, documentation, "
+        "visual-only, or external-reproduction candidates.\n"
+        "Do not repeat a completed action signature after a no-gain result. Do not run every tool merely for coverage. "
+        "Stop when a source-read candidate has direct entity and program-flow evidence and no required responsibility "
+        "obligation remains unresolved. Keep queries concrete and repository-oriented.\n\n"
         f"Instance: {sample.instance_id}\n"
         f"Repo: {sample.repo}\n"
         f"Task type: {getattr(issue_sketch, 'task_type', 'unknown')}\n"
@@ -170,8 +173,8 @@ def _planner_prompt(
         f"Seed policy: {issue_sketch.seed_policy[:6]}\n"
         f"Queries: {queries[:18]}\n"
         f"Previous candidates: {previous_candidates[:12]}\n"
-        f"Tool history: {history[-4:]}\n"
-        f"Tools not yet covered: {missing_tools}\n"
+        f"Recent evidence state: {history[-6:]}\n"
+        f"Completed action signatures: {completed_signatures[-12:]}\n"
         f"Step: {step_no}\n"
     )
 
@@ -386,7 +389,10 @@ def run_react_tool_agent(
         start = time.time()
         required_order = _required_tool_order(issue_sketch)
         used_tools = [str(item.get("tool") or "") for item in planner_history]
-        coverage_complete = all(tool in used_tools for tool in required_order)
+        enforce_coverage = os.environ.get("MYCODE_REACT_ENFORCE_TOOL_COVERAGE", "0").strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+        coverage_complete = not enforce_coverage or all(tool in used_tools for tool in required_order)
         no_gain_limit = _env_int("MYCODE_REACT_NO_GAIN_STEPS", 2, minimum=1)
         if coverage_complete and consecutive_no_gain >= no_gain_limit:
             stop_reason = "evidence_plateau_after_tool_coverage"
@@ -443,7 +449,7 @@ def run_react_tool_agent(
             fallback["planner_fallback_reason"] = "missing_or_unknown_tool"
             move = {**fallback, **{k: v for k, v in move.items() if k == "thought" and v}}
 
-        if os.environ.get("MYCODE_REACT_ENFORCE_TOOL_COVERAGE", "1").strip().lower() in {"1", "true", "yes", "on"}:
+        if enforce_coverage:
             used_tools = [str(item.get("tool") or "") for item in planner_history]
             missing_tools = [tool for tool in required_order if tool not in used_tools]
             selected_tool = str(move.get("tool") or "")
@@ -480,10 +486,8 @@ def run_react_tool_agent(
         action_signature = "|".join(
             [str(move.get("tool") or ""), str(move.get("mode") or ""), *action_query_keys]
         )
-        coverage_complete = all(tool in used_tools for tool in required_order)
         if (
-            coverage_complete
-            and action_signature in seen_action_signatures
+            action_signature in seen_action_signatures
             and planner_history
             and bool(planner_history[-1].get("no_evidence_gain"))
         ):
@@ -491,7 +495,7 @@ def run_react_tool_agent(
             steps.append(
                 ReActStep(
                     round_no=step_no,
-                    thought=(str(move.get("thought") or "") + " Repeated action suppressed after a no-gain observation.").strip(),
+                    thought=(str(move.get("thought") or move.get("decision_basis") or "") + " Repeated action suppressed after a no-gain observation.").strip(),
                     tool="Stop",
                     action="stop",
                     tool_input={"candidate_count": len(candidate_paths), "duplicate_action": action_signature},
@@ -511,7 +515,7 @@ def run_react_tool_agent(
             steps.append(
                 ReActStep(
                     round_no=step_no,
-                    thought=str(move.get("thought") or "Stop requested by controller."),
+                    thought=str(move.get("thought") or move.get("decision_basis") or "Stop requested by controller."),
                     tool="Stop",
                     action="stop",
                     tool_input={"candidate_count": len(candidate_paths)},
@@ -572,7 +576,7 @@ def run_react_tool_agent(
         steps.append(
             ReActStep(
                 round_no=step_no,
-                thought=str(move.get("thought") or ""),
+                thought=str(move.get("thought") or move.get("decision_basis") or ""),
                 tool=str(move.get("tool") or ""),
                 action=str(observation_dict.get("action") or move.get("mode") or ""),
                 tool_input={

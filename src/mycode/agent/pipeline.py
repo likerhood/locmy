@@ -29,7 +29,7 @@ def _make_controller_llm(enabled: bool):
     if not enabled:
         return None
 
-    def _controller(prompt: str) -> Dict[str, Any]:
+    def _controller(prompt: str, *, max_tokens: int = 900) -> Dict[str, Any]:
         try:
             response = chat_completion(
                 [
@@ -44,7 +44,7 @@ def _make_controller_llm(enabled: bool):
                 ],
                 model=model_for_stage("controller"),
                 temperature=0,
-                max_tokens=900,
+                max_tokens=max(256, int(max_tokens)),
                 timeout=120,
             )
         except LLMClientError as exc:

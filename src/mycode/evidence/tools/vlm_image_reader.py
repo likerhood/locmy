@@ -305,9 +305,12 @@ def _vlm_messages(*, uri: str, issue_summary: str, repo: str) -> list[dict[str, 
         {
             "role": "system",
             "content": (
-                "You are the visual-evidence interpreter for a code-localization task. Describe only "
-                "phenomena visible in the image, UI or chart entities, visible text, interaction state, "
-                "and potentially relevant code layers. Do not predict gold files. Return one compact "
+                "You are the visual-evidence interpreter for a code-localization task. Report observable "
+                "image facts separately from hypotheses. Describe visible text, UI or chart entities, "
+                "interaction state, and the expected-versus-actual visual difference. Do not predict files, "
+                "source symbols, CSS selectors, handlers, conditions, or routes unless they are literally visible. "
+                "Generic words such as component, layout, plugin, and state are low-confidence navigation hints only. "
+                "Use broad code-layer categories rather than repository paths. Return one compact "
                 "JSON object only, with no Markdown, preamble, prompt restatement, or hidden "
                 "chain-of-thought. Write generated descriptions and search queries in English. Preserve "
                 "visible text and program identifiers verbatim."
@@ -322,8 +325,9 @@ def _vlm_messages(*, uri: str, issue_summary: str, repo: str) -> list[dict[str, 
                         "Analyze this issue image and return these JSON fields: visible_text, "
                         "visual_entities, symptom, expected_actual_difference, likely_code_layers, "
                         "search_queries, cautions, image_type, root_objects, nodes, edges. "
-                        "Nodes and edges should capture only issue-relevant visual structure. Keep each "
-                        "field concise and evidence-grounded.\n"
+                        "Nodes and edges should capture only issue-relevant visible structure. Search queries "
+                        "may contain visible labels and behavior terms, but never invented implementation names. "
+                        "Keep each field concise and evidence-grounded.\n"
                         f"repo={repo}\nissue_summary={issue_summary}"
                     ),
                 },

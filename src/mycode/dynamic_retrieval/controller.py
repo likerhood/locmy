@@ -369,11 +369,17 @@ def _controller_prompt(
         ],
     }
     return (
-        "You are controlling a repository localization agent. Decide the next actions as JSON only.\n"
-        "Use evidence roles carefully: explicit URL/image evidence can be a navigation seed, not a patch target.\n"
-        "Prefer horizontal concern search plus vertical call/used-by navigation, then flow verification.\n"
-        "Return JSON with key decisions, a list of objects with tool, mode, reason, queries, preferred_edge_types, "
-        "seed_strategy, confidence, stop.\n\n"
+        "You are the evidence-gap controller for repository issue localization. Choose one or two actions "
+        "that resolve the highest-priority missing source or program-flow evidence.\n"
+        "Use URL, image, generated, documentation, test, and external-reproduction evidence only for navigation. "
+        "Use ReadCode when a leading candidate lacks source verification. Use TraceFlow only when its endpoints "
+        "are grounded in observed source symbols. Do not expand the graph merely because two files are adjacent.\n"
+        "Do not repeat an earlier query without a specific new evidence gap, and do not run tools merely for "
+        "coverage. Keep each action to at most three concrete queries. Return one compact JSON object only.\n"
+        "Schema: {\"decisions\":[{\"tool\":\"SearchAnchor|NavigateCode|TraceFlow|ReadCode\","
+        "\"mode\":\"allowed mode\",\"reason\":\"one evidence gap\",\"queries\":[\"specific query\"],"
+        "\"preferred_edge_types\":[],\"seed_strategy\":\"current_verified_source\","
+        "\"confidence\":0.0,\"stop\":false}]}.\n\n"
         + json.dumps(payload, ensure_ascii=False, sort_keys=True)
     )
 
@@ -438,7 +444,7 @@ def _parse_llm_decisions(value: str | dict[str, Any]) -> list[ControllerDecision
                 tool=tool,
                 mode=mode,
                 reason=reason,
-                queries=_dedupe(queries, limit=8),
+                queries=_dedupe(queries, limit=3),
                 preferred_edge_types=_dedupe(edges, limit=12),
                 seed_strategy=str(item.get("seed_strategy") or ""),
                 stop=bool(item.get("stop") or False),
@@ -446,7 +452,7 @@ def _parse_llm_decisions(value: str | dict[str, Any]) -> list[ControllerDecision
                 source="llm",
             )
         )
-    return parsed[:8]
+    return parsed[:2]
 
 
 def decide_next_actions(
@@ -525,11 +531,11 @@ def decide_next_actions(
                 tool="SearchAnchor",
                 mode="heuristic_support",
                 reason="Add deterministic query support because the LLM controller produced sparse queries.",
-                queries=heuristic_queries[:8],
+                queries=heuristic_queries[:3],
                 preferred_edge_types=_dedupe(edge for decision in heuristic for edge in decision.preferred_edge_types)[:12],
                 seed_strategy="hybrid_llm_heuristic",
                 source="heuristic_support",
                 confidence=0.5,
             )
         )
-    return parsed[:8]
+    return parsed[:2]

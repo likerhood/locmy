@@ -31,6 +31,7 @@ def _queries_from_observation(observation: ToolObservation) -> Dict[str, List[st
     extracted = observation.extracted or {}
     groups: Dict[str, List[str]] = {
         "symbol": [],
+        "local_code": [],
         "concern": [],
         "reproduction": [],
         "visual": [],

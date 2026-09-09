@@ -115,6 +115,42 @@ def test_local_code_synthesis_group_becomes_explicit_entity_query() -> None:
     assert "src/main/java/org/assertj/core/internal/Strings.java" in groups["explicit_entity"]
 
 
+def test_github_local_path_is_preserved_in_evidence_synthesis() -> None:
+    plan = EvidenceCollectionPlan(
+        instance_id="processing__p5.js-6111",
+        repo="processing/p5.js",
+        dataset="unit",
+        issue_summary="Camera clipping behavior should use the referenced implementation.",
+    )
+    packet = EvidencePacket(
+        instance_id=plan.instance_id,
+        repo=plan.repo,
+        dataset=plan.dataset,
+        issue_summary=plan.issue_summary,
+        modality="text_only",
+    )
+    observation = ToolObservation(
+        tool="github_url_parser",
+        source="https://github.com/processing/p5.js/blob/main/src/webgl/p5.Camera.js",
+        success=True,
+        status="ok",
+        extracted={
+            "path": "src/webgl/p5.Camera.js",
+            "local_path": "src/webgl/p5.Camera.js",
+            "symbol_hint": "Camera",
+        },
+    )
+
+    synthesis = synthesize_evidence(
+        packet=packet,
+        plan=plan,
+        observations=[observation],
+    )
+
+    assert synthesis["query_groups"]["local_code"] == ["src/webgl/p5.Camera.js"]
+    assert any(item["kind"] == "local_code_navigation" for item in synthesis["navigation_hints"])
+
+
 def test_llm_issue_terms_require_a_non_generic_issue_anchor() -> None:
     issue = "Allow transferring plan ownership to another administrator."
     terms = _grounded_llm_terms(

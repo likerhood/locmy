@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
 import re
 from typing import Any, Callable, Iterable
@@ -16,6 +18,8 @@ ALLOWED_ROLES = {
     "test_or_docs",
     "unlikely",
 }
+
+_REVIEW_CACHE: dict[str, dict[str, Any]] = {}
 
 
 def _dedupe(values: Iterable[str], *, limit: int = 40) -> list[str]:
@@ -133,18 +137,38 @@ def _candidate_packet(
     ranked: Iterable[Any],
     code_contexts: Iterable[dict[str, Any]],
     *,
+    issue_text: str,
     limit: int,
 ) -> list[dict[str, Any]]:
     contexts = {str(item.get("path") or ""): item for item in code_contexts}
+    issue_terms = {
+        token.lower()
+        for token in re.split(r"[^A-Za-z0-9_$]+", issue_text)
+        if len(token) >= 4
+    }
     packet: list[dict[str, Any]] = []
     for rank, item in enumerate(list(ranked)[:limit], start=1):
         path = str(getattr(item, "path", "") or "")
         if not path:
             continue
         context = contexts.get(path, {})
+        raw_entities = list(context.get("entities", []) or getattr(item, "entities", []) or [])[:8]
+        entity_terms = {
+            str(entity.get("name") or "").lower()
+            for entity in raw_entities
+            if isinstance(entity, dict) and len(str(entity.get("name") or "")) >= 3
+        }
         snippets = []
         seen_ranges: set[tuple[Any, Any]] = set()
-        for snippet in context.get("snippets", []) or []:
+        snippet_rows = []
+        for original_position, snippet in enumerate(context.get("snippets", []) or []):
+            snippet_text = str(snippet.get("text") or "")
+            lowered = snippet_text.lower()
+            overlap = sum(1 for term in issue_terms if term in lowered)
+            entity_overlap = sum(1 for term in entity_terms if term in lowered)
+            snippet_rows.append((overlap * 2 + entity_overlap * 3, -original_position, snippet))
+        snippet_rows.sort(key=lambda row: (-row[0], -row[1]))
+        for _score, _position, snippet in snippet_rows:
             line_range = (snippet.get("start_line"), snippet.get("end_line"))
             if line_range in seen_ranges:
                 continue
@@ -153,7 +177,7 @@ def _candidate_packet(
                 {
                     "start_line": snippet.get("start_line"),
                     "end_line": snippet.get("end_line"),
-                    "text": str(snippet.get("text") or "")[:480],
+                    "text": str(snippet.get("text") or "")[:600],
                 }
             )
             if len(snippets) >= 2:
@@ -162,7 +186,10 @@ def _candidate_packet(
         compact_components = dict(
             sorted(raw_components.items(), key=lambda pair: -abs(float(pair[1] or 0.0)))[:5]
         )
-        raw_entities = list(context.get("entities", []) or getattr(item, "entities", []) or [])[:5]
+        direct_flow_evidence = any(
+            float(raw_components.get(name, 0.0) or 0.0) > 0
+            for name in ("call_score", "flow_score", "flow_verifier")
+        )
         packet.append(
             {
                 "rank": rank,
@@ -182,6 +209,7 @@ def _candidate_packet(
                 ],
                 "snippets": snippets,
                 "has_code_context": bool(snippets),
+                "direct_flow_evidence": direct_flow_evidence,
             }
         )
     return packet
@@ -270,6 +298,7 @@ def _validate(
     allowed_paths: set[str],
     grounded_paths: set[str],
     context_text_by_path: dict[str, str],
+    direct_flow_paths: set[str],
 ) -> dict[str, Any]:
     raw_candidates = data.get("candidates")
     if not isinstance(raw_candidates, list):
@@ -303,15 +332,20 @@ def _validate(
             len(evidence_quote) >= 8
             and evidence_quote.lower() in context_text
         )
-        entity_supported = bool(entities) and all(
-            str(entity.get("name") or "").lower() in context_text
+        supported_entities = [
+            entity
             for entity in entities
-        )
+            if str(entity.get("name") or "").lower() in context_text
+        ]
+        unsupported_entities = [entity for entity in entities if entity not in supported_entities]
+        entity_supported = bool(supported_entities)
+        direct_flow_supported = path in direct_flow_paths
         mechanism_verified = bool(
             item.get("mechanism_verified", False)
             and path in grounded_paths
             and quote_supported
             and entity_supported
+            and direct_flow_supported
             and str(item.get("patch_mechanism") or "").strip()
         )
         candidates.append(
@@ -324,6 +358,9 @@ def _validate(
                 "grounded": path in grounded_paths,
                 "quote_supported": quote_supported,
                 "entity_supported": entity_supported,
+                "supported_entities": supported_entities[:8],
+                "unsupported_entities": unsupported_entities[:8],
+                "direct_flow_supported": direct_flow_supported,
                 "mechanism_verified": mechanism_verified,
                 "patch_mechanism": " ".join(str(item.get("patch_mechanism") or "").split())[:500],
                 "counterevidence": _dedupe(item.get("counterevidence", []) or [], limit=6),
@@ -386,13 +423,26 @@ def review_candidates(
     candidate_limit: int = 12,
     repair_attempts: int = 1,
 ) -> dict[str, Any]:
-    candidates = _candidate_packet(ranked, code_contexts, limit=max(3, candidate_limit))
+    flow_traces = list(flow_traces)
+    candidates = _candidate_packet(
+        ranked,
+        code_contexts,
+        issue_text=issue_text,
+        limit=max(3, candidate_limit),
+    )
     if llm is None:
         return {"status": "disabled", "reason": "no_llm", "candidates": []}
     if not candidates:
         return {"status": "skipped", "reason": "no_candidates", "candidates": []}
     allowed_paths = {item["path"] for item in candidates}
     grounded_paths = {item["path"] for item in candidates if item.get("has_code_context")}
+    direct_flow_paths = {item["path"] for item in candidates if item.get("direct_flow_evidence")}
+    for flow in flow_traces:
+        direct_flow_paths.update(
+            str(path).replace("\\", "/").strip().lstrip("./")
+            for path in flow.get("candidate_target_paths", []) or []
+            if str(path).strip()
+        )
     context_text_by_path = {
         item["path"]: "\n".join(str(snippet.get("text") or "") for snippet in item.get("snippets", []) or [])
         for item in candidates
@@ -404,6 +454,35 @@ def review_candidates(
         flow_traces=flow_traces,
         round_no=round_no,
     )
+    cache_payload = {
+        "llm_identity": id(llm),
+        "issue_text": issue_text,
+        "candidates": [
+            {
+                "path": item.get("path"),
+                "entities": item.get("entities", []),
+                "snippets": item.get("snippets", []),
+                "direct_flow_evidence": item.get("direct_flow_evidence", False),
+            }
+            for item in candidates
+        ],
+        "flows": [
+            {
+                "flow_type": flow.get("flow_type"),
+                "term": flow.get("term"),
+                "candidate_target_paths": list(flow.get("candidate_target_paths", []) or [])[:8],
+            }
+            for flow in list(flow_traces)[:5]
+        ],
+    }
+    cache_key = hashlib.sha256(
+        json.dumps(cache_payload, sort_keys=True, ensure_ascii=True, default=str).encode("utf-8")
+    ).hexdigest()
+    cached = _REVIEW_CACHE.get(cache_key)
+    if cached is not None:
+        result = copy.deepcopy(cached)
+        result["cache_hit"] = True
+        return result
     attempts: list[dict[str, Any]] = []
     active_prompt = prompt
     for attempt_no in range(1, max(1, repair_attempts + 1) + 1):
@@ -419,6 +498,7 @@ def review_candidates(
             allowed_paths=allowed_paths,
             grounded_paths=grounded_paths,
             context_text_by_path=context_text_by_path,
+            direct_flow_paths=direct_flow_paths,
         )
         usage = response.get("usage") if isinstance(response, dict) else {}
         attempt = {
@@ -434,6 +514,10 @@ def review_candidates(
             parsed["recovered_from_truncated_json"] = parse_mode == "partial_candidate_recovery"
             parsed["attempts"] = attempts
             parsed["candidate_count"] = len(candidates)
+            parsed["cache_hit"] = False
+            if len(_REVIEW_CACHE) >= 128:
+                _REVIEW_CACHE.pop(next(iter(_REVIEW_CACHE)))
+            _REVIEW_CACHE[cache_key] = copy.deepcopy(parsed)
             return parsed
         active_prompt = (
             "Repair the syntax of the previous candidate review. Return compact JSON only. "

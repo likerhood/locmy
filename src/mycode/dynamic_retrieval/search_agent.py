@@ -29,7 +29,7 @@ from mycode.dynamic_retrieval.fast_seed_planner import plan_fast_seeds
 from mycode.dynamic_retrieval.navigation_policy import select_navigation_actions, summarize_agent_observation
 from mycode.dynamic_retrieval.react_agent import run_react_tool_agent
 from mycode.dynamic_retrieval.tools import run_four_tool_agent_round
-from mycode.evidence.issue_sketch import build_issue_sketch, sketch_query_terms
+from mycode.evidence.issue_sketch import build_issue_sketch, semantic_issue_text, sketch_query_terms
 from mycode.repo_index.typed_graph import TypedRepositoryGraph
 from mycode.repo_index.structure_index import CodeEntity, RepositoryIndex, SearchHit, tokenize
 from mycode.schemas.evidence import NormalizedSample
@@ -227,7 +227,7 @@ def _issue_query_text(issue_text: str) -> str:
     text = str(issue_text or "")
     for marker in ("\n[Multimodal Context - Compact]", "\n[Adapter Note]", "\n[adapter_fallback="):
         text = text.split(marker, 1)[0]
-    return text
+    return semantic_issue_text(text)
 
 
 def _grounded_evidence_queries(values: Iterable[str], issue_text: str, *, limit: int = 40) -> list[str]:
@@ -296,7 +296,7 @@ def _path_semantic_terms(
         values.extend(sketch.architectural_queries or [])
     except Exception:
         pass
-    values.append(sample.issue_text[:3000])
+    values.append(_issue_query_text(sample.issue_text)[:3000])
     terms: list[str] = []
     for value in values:
         for token in tokenize(str(value or "")):
@@ -347,8 +347,11 @@ def _tool_queries(tool_observations: Iterable[Dict[str, Any]], *, issue_text: st
             if plan.get("preview_url"):
                 queries.append(str(plan["preview_url"]))
             for item in extracted.get("source_files", []) or []:
-                queries.append(str(item.get("path") or ""))
-                queries.append(str(item.get("code_preview") or "")[:500])
+                if item.get("eligible_as_patch_target", True):
+                    queries.append(str(item.get("path") or ""))
+                    queries.append(str(item.get("code_preview") or "")[:500])
+                else:
+                    queries.extend(str(symbol) for symbol in item.get("symbols", []) or [])
         elif observation.get("tool") == "playground_decoder":
             queries.extend(extracted.get("semantic_queries", []) or [])
             queries.extend(extracted.get("likely_layers", []) or [])
@@ -452,6 +455,7 @@ def _build_localization_query_groups(
     groups: dict[str, list[str]] = {
         "explicit_entity": [],
         "evidence_role": [],
+        "visual": [],
         "concern": [],
         "architecture": [],
         "effect": [],
@@ -482,7 +486,7 @@ def _build_localization_query_groups(
     groups["effect"].extend(search_queries.get("effects", []) or [])
     groups["effect"].extend(packet.get("effect_queries", []) or [])
     for token in ("redirect", "hide", "show", "error", "report", "serialize", "hover", "leave"):
-        if token in sample.issue_text.lower():
+        if token in _issue_query_text(sample.issue_text).lower():
             groups["effect"].append(token)
 
     groups["flow"].extend(search_queries.get("flows", []) or [])
@@ -497,7 +501,7 @@ def _build_localization_query_groups(
                 for key in ("flow_type", "state", "behavior", "required_relation")
             )
         )
-    groups["flow"].extend(build_flow_queries(sample.issue_text, tool_observations))
+    groups["flow"].extend(build_flow_queries(_issue_query_text(sample.issue_text), tool_observations))
 
     for item in packet.get("url_inspections", []) or []:
         role = str(item.get("role") or item.get("url_type") or "")
@@ -509,7 +513,7 @@ def _build_localization_query_groups(
         groups["evidence_role"].extend(case.get("semantic_queries", []) or [])
         groups["evidence_role"].extend(case.get("likely_layers", []) or [])
     for image in packet.get("image_inspections", []) or []:
-        groups["evidence_role"].extend(
+        groups["visual"].extend(
             _grounded_evidence_queries(
                 list(image.get("visual_queries", []) or []) + list(image.get("likely_layers", []) or []),
                 sample.issue_text,
@@ -523,7 +527,7 @@ def _build_localization_query_groups(
         "local_code": "explicit_entity",
         "url_seed": "evidence_role",
         "reproduction": "evidence_role",
-        "visual": "evidence_role",
+        "visual": "visual",
         "docs": "concern",
         "flow": "flow",
         "concern": "concern",
@@ -548,7 +552,7 @@ def _build_localization_query_groups(
 
 
 def _concern_expansion(sample: NormalizedSample, evidence_result: Dict[str, Any]) -> list[str]:
-    text = sample.issue_text.lower()
+    text = _issue_query_text(sample.issue_text).lower()
     queries: list[str] = []
     if "legend" in text:
         queries.extend(["legend plugin legend event", "plugin.legend legend item hover leave"])
@@ -586,7 +590,7 @@ def _domain_path_probes(sample: NormalizedSample, evidence_result: Dict[str, Any
     # Repository-specific probes are only cheap recall hints. Gate them on the
     # original issue so repeated VLM/LLM synthesis cannot hallucinate a domain
     # and turn that hint into a dominant ranking signal.
-    issue_text = sample.issue_text.lower()
+    issue_text = _issue_query_text(sample.issue_text).lower()
     text = f"{sample.instance_id} {sample.repo} {issue_text} {sketch_text}".lower()
     probes: list[str] = []
 
@@ -934,6 +938,10 @@ def _build_deep_graph_scope(
     hit_limit = max(scope_limit, top_k * multiplier, 30)
     file_hits = index.search_files(prefilter_queries, limit=hit_limit)
     entity_hits = index.search_entities(prefilter_queries, limit=hit_limit)
+    visual_prefilter_hits = index.search_files(
+        _sanitize_retrieval_queries(query_groups.get("visual", []), limit=24),
+        limit=min(24, hit_limit),
+    )
 
     scores: dict[str, float] = defaultdict(float)
     reasons: dict[str, list[str]] = defaultdict(list)
@@ -950,10 +958,25 @@ def _build_deep_graph_scope(
         add(hit.path, hit.score, "prefilter:file:" + ",".join(hit.reasons[:3]))
     for hit in entity_hits:
         add(hit.path, hit.score * 1.25, f"prefilter:entity:{hit.kind}:{hit.name}")
+    for hit in visual_prefilter_hits:
+        add(hit.path, hit.score * 0.20, "prefilter:low_weight_visual_navigation")
     for idx, path in enumerate(seed_paths):
         # Evidence-only URLs should not become final targets, but they are useful
         # source nodes for used_by/called_by navigation.
         add(path, max(20.0, 80.0 - idx), "prefilter:evidence_seed_for_navigation")
+    local_directory_prefixes = _dedupe(
+        [
+            _norm_path(str((observation.get("extracted", {}) or {}).get("local_path_prefix") or ""))
+            for observation in evidence_result.get("tool_observations", []) or []
+            if observation.get("tool") == "github_url_parser"
+        ],
+        limit=8,
+    )
+    for prefix in local_directory_prefixes:
+        prefix_root = prefix.rstrip("/") + "/"
+        for path in index.files:
+            if path == prefix or path.startswith(prefix_root):
+                add(path, 55.0, f"prefilter:github_tree_local_scope:{prefix}")
     for query in prefilter_queries[:query_budget]:
         qnorm = _norm_path(str(query))
         if qnorm in index.files:
@@ -992,8 +1015,8 @@ def _build_deep_graph_scope(
     if _env_bool("MYCODE_SOURCE_FIRST_FILTER", True):
         for path in list(scores):
             old_score = scores[path]
-            multiplier, reason = _source_first_multiplier(path, sample.issue_text)
-            cap, cap_reason = _source_first_score_cap(path, sample.issue_text)
+            multiplier, reason = _source_first_multiplier(path, _issue_query_text(sample.issue_text))
+            cap, cap_reason = _source_first_score_cap(path, _issue_query_text(sample.issue_text))
             if multiplier == 1.0 and cap is None:
                 continue
             scores[path] = old_score * multiplier
@@ -1036,8 +1059,10 @@ def _build_deep_graph_scope(
         "path_semantic_terms": path_terms[:32],
         "file_hit_count": len(file_hits),
         "entity_hit_count": len(entity_hits),
+        "visual_hit_count": len(visual_prefilter_hits),
         "path_probe_hit_count": len(path_probe_hits),
         "evidence_seed_paths": seed_paths[:20],
+        "local_directory_prefixes": local_directory_prefixes,
         "same_dir_neighbor_count": len(same_dir_paths),
         "source_first_filter": {
             "enabled": _env_bool("MYCODE_SOURCE_FIRST_FILTER", True),
@@ -1367,7 +1392,7 @@ def _read_code_context(
 
 
 def _path_concern_bonus(path: str, sample: NormalizedSample, evidence_result: Dict[str, Any]) -> tuple[float, list[str]]:
-    lower = f"{path} {sample.issue_text} {evidence_result.get('evidence_synthesis', {})}".lower()
+    lower = f"{path} {_issue_query_text(sample.issue_text)} {evidence_result.get('evidence_synthesis', {})}".lower()
     bonus = 0.0
     reasons: list[str] = []
     rules = [
@@ -1411,7 +1436,10 @@ def _path_role(path: str) -> str:
     if filename.endswith((
         ".min.js", ".min.css", ".bundle.js", ".bundle.css",
         ".umd.js", ".umd.cjs", ".umd.mjs", ".map",
-    )) or any(
+    )) or (
+        first_part == "lib"
+        and filename.endswith((".esm.js", ".esm.mjs", ".esm.cjs"))
+    ) or any(
         part in lower for part in ("/dist/", "/build/", "/vendor/", "/generated/")
     ) or first_part in {"dist", "build", "vendor", "generated"}:
         return "generated_or_lockfile"
@@ -1524,8 +1552,8 @@ def _apply_source_first_policy(
     for item in aggregate.values():
         norm = _norm_path(item.path)
         old_score = float(item.score or 0.0)
-        multiplier, reason = _source_first_multiplier(norm, sample.issue_text)
-        cap, cap_reason = _source_first_score_cap(norm, sample.issue_text)
+        multiplier, reason = _source_first_multiplier(norm, _issue_query_text(sample.issue_text))
+        cap, cap_reason = _source_first_score_cap(norm, _issue_query_text(sample.issue_text))
         if multiplier == 1.0 and cap is None:
             continue
         if multiplier > 1.0:
@@ -1831,6 +1859,7 @@ def _frontier_query_groups(
     groups = {
         "explicit_entity": [],
         "evidence_role": [],
+        "visual": [],
         "concern": [],
         "architecture": [],
         "effect": [],
@@ -2099,7 +2128,7 @@ def _run_flow_backends_layered(
         )
         out = fn(
             flow_index,
-            issue_text=sample.issue_text,
+            issue_text=_issue_query_text(sample.issue_text),
             tool_observations=tool_observations,
             queries=active_queries,
             limit=flow_limit,
@@ -2404,7 +2433,7 @@ def _apply_verifier(
                 score *= 0.82
             score -= penalty
             components["role_penalty"] = components.get("role_penalty", 0.0) - penalty
-        cap, cap_reason = _source_first_score_cap(norm, sample.issue_text)
+        cap, cap_reason = _source_first_score_cap(norm, _issue_query_text(sample.issue_text))
         if cap is not None and score > cap:
             components["source_first_post_verifier_cap"] = components.get("source_first_post_verifier_cap", 0.0) + (cap - score)
             score = cap
@@ -2537,8 +2566,8 @@ def _round_progress(
     previous_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     previous_paths = {_norm_path(item.path) for item in previous_ranked}
-    current_top = [_norm_path(item.path) for item in ranked[:5]]
-    previous_top = [_norm_path(item.path) for item in previous_ranked[:5]]
+    current_top = [_norm_path(item.path) for item in ranked[:6]]
+    previous_top = [_norm_path(item.path) for item in previous_ranked[:6]]
     new_top_paths = [path for path in current_top if path not in previous_paths]
     evidence_gains = sum(int((item.belief or {}).get("evidence_gain_count") or 0) for item in ranked[:5])
     strong_evidence_prefixes = (
@@ -2640,15 +2669,25 @@ def _round_checkpoint_quality(search_round: DynamicSearchRound) -> dict[str, Any
     mechanism_verified = bool(review.get("mechanism_verified"))
     direct_axes = axes & {"vertical_program", "flow_validation"}
     confidence = float((search_round.stop_decision.get("confidence") or {}).get("confidence") or 0.0)
-    verified_top5 = sum(
+    top_six = ranked[:6]
+    verified_top6 = sum(
         1
-        for item in ranked[:5]
+        for item in top_six
         if bool(((item.belief or {}).get("llm_candidate_review") or {}).get("mechanism_verified"))
     )
-    grounded_top5 = sum(
+    grounded_top6 = sum(
         1
-        for item in ranked[:5]
+        for item in top_six
         if bool(((item.belief or {}).get("llm_candidate_review") or {}).get("grounded"))
+    )
+    verified_source_top6 = sum(
+        1
+        for item in top_six
+        if bool((item.belief or {}).get("read_verified"))
+        and _path_role(item.path) not in _CLOSURE_BLOCKED_ROLES
+    )
+    blocked_role_top6 = sum(
+        1 for item in top_six if _path_role(item.path) in _CLOSURE_BLOCKED_ROLES
     )
     critical_missing = list(
         ((search_round.verifier or {}).get("llm_candidate_review") or {}).get(
@@ -2669,13 +2708,26 @@ def _round_checkpoint_quality(search_round: DynamicSearchRound) -> dict[str, Any
         + (2.0 if grounded else 0.0)
         + (1.5 if read_verified else 0.0)
         + len(direct_axes) * 1.5
-        + verified_top5 * 0.8
-        + grounded_top5 * 0.25
+        + verified_top6 * 0.8
+        + grounded_top6 * 0.25
         - min(2.0, len(critical_missing) * 0.5)
+        - blocked_role_top6 * 0.75
         - (1.5 if architecture_only else 0.0)
     )
+    flow_coverage = min(1.0, len(getattr(search_round, "flow_traces", []) or []) / 3.0)
+    selection_key = [
+        int(mechanism_verified),
+        verified_top6,
+        verified_source_top6,
+        grounded_top6,
+        round(flow_coverage, 4),
+        -blocked_role_top6,
+        -len(critical_missing),
+        round(confidence, 4),
+    ]
     return {
         "score": round(score, 4),
+        "selection_key": selection_key,
         "round_no": search_round.round_no,
         "top_path": top.path,
         "confidence": round(confidence, 4),
@@ -2683,11 +2735,29 @@ def _round_checkpoint_quality(search_round: DynamicSearchRound) -> dict[str, Any
         "grounded": grounded,
         "mechanism_verified": mechanism_verified,
         "direct_axes": sorted(direct_axes),
-        "verified_top5": verified_top5,
-        "grounded_top5": grounded_top5,
+        "root_mechanism_candidate_count": verified_top6,
+        "verified_source_count_in_top6": verified_source_top6,
+        "grounded_candidate_count_in_top6": grounded_top6,
+        "required_flow_coverage": round(flow_coverage, 4),
+        "negative_blocked_role_count_in_top6": blocked_role_top6,
         "critical_missing_count": len(critical_missing),
         "architecture_only": architecture_only,
     }
+
+
+def _checkpoint_is_better(
+    candidate: dict[str, Any],
+    incumbent: dict[str, Any],
+    *,
+    minimum_gain: float,
+) -> bool:
+    if not incumbent:
+        return True
+    candidate_key = tuple(candidate.get("selection_key", []) or [])
+    incumbent_key = tuple(incumbent.get("selection_key", []) or [])
+    if candidate_key and incumbent_key and candidate_key != incumbent_key:
+        return candidate_key > incumbent_key
+    return float(candidate.get("score") or -1.0) > float(incumbent.get("score") or -1.0) + minimum_gain
 
 
 def _flow_signature(flow: dict[str, Any]) -> tuple[str, str, str]:
@@ -2884,13 +2954,13 @@ def _lightweight_dynamic_localize(
         if not norm or norm not in index.files:
             return
         penalty = 0.70 if norm in evidence_seed_paths else 1.0
-        source_multiplier, source_reason = _source_first_multiplier(norm, sample.issue_text)
+        source_multiplier, source_reason = _source_first_multiplier(norm, _issue_query_text(sample.issue_text))
         item = aggregate.get(norm)
         if item is None:
             item = RankedLocation(path=norm, score=0.0, reasons=[])
             aggregate[norm] = item
         item.score += float(score or 0.0) * penalty * source_multiplier
-        cap, cap_reason = _source_first_score_cap(norm, sample.issue_text)
+        cap, cap_reason = _source_first_score_cap(norm, _issue_query_text(sample.issue_text))
         if cap is not None and item.score > cap:
             item.score = cap
             if cap_reason not in item.reasons:
@@ -3407,10 +3477,12 @@ def _stop_decision(
     if (
         _env_bool("MYCODE_EARLY_STOP_EVIDENCE_PLATEAU", True)
         and int(round_progress.get("plateau_streak") or 0) >= plateau_limit
+        and not review_requests_more
+        and not critical_missing
     ):
         return {
             "stop": True,
-            "reason": "evidence_plateau_with_unresolved_gap" if review_requests_more or critical_missing else "evidence_plateau",
+            "reason": "evidence_plateau",
             "top_paths": current_top,
             "confidence": confidence,
             "round_progress": round_progress,
@@ -3525,12 +3597,70 @@ def _apply_llm_candidate_review(
             "evidence_quote": str(decision.get("evidence_quote") or "")[:240],
             "quote_supported": bool(decision.get("quote_supported", False)),
             "entity_supported": bool(decision.get("entity_supported", False)),
+            "supported_entities": list(decision.get("supported_entities", []) or [])[:8],
+            "unsupported_entities": list(decision.get("unsupported_entities", []) or [])[:8],
+            "direct_flow_supported": bool(decision.get("direct_flow_supported", False)),
             "mechanism_verified": mechanism_verified,
             "patch_mechanism": str(decision.get("patch_mechanism") or "")[:400],
             "counterevidence": counterevidence[:6],
         }
     ranked.sort(key=lambda candidate: (-candidate.score, candidate.path))
     return ranked[:top_k]
+
+
+def _candidate_evidence_facts(
+    item: RankedLocation,
+    *,
+    decision: dict[str, Any],
+    context_paths: set[str],
+) -> dict[str, Any]:
+    path = _norm_path(item.path)
+    belief = item.belief or {}
+    embedded_review = belief.get("llm_candidate_review") or {}
+    resolved_decision = decision or embedded_review
+    components = item.score_components or {}
+    read_verified = path in context_paths or bool(belief.get("read_verified"))
+    quote_supported = bool(resolved_decision.get("quote_supported")) and read_verified
+    entity_supported = bool(
+        resolved_decision.get("supported_entities")
+        or resolved_decision.get("entity_supported")
+    ) and read_verified
+    grounded = bool(
+        resolved_decision.get("grounded", quote_supported or entity_supported)
+    ) and read_verified
+    direct_flow = bool(resolved_decision.get("direct_flow_supported")) or any(
+        float(components.get(name, 0.0) or 0.0) > 0
+        for name in ("call_score", "flow_score", "flow_verifier")
+    )
+    counterevidence = _dedupe(
+        list(resolved_decision.get("counterevidence", []) or [])
+        + list(resolved_decision.get("counter_evidence", []) or []),
+        limit=8,
+    )
+    role = _path_role(path)
+    patchable = role not in _CLOSURE_BLOCKED_ROLES
+    mechanism = bool(resolved_decision.get("mechanism_verified")) and grounded
+    equivalent_mechanism = bool(
+        patchable and read_verified and quote_supported and entity_supported and direct_flow
+    )
+    lock_eligible = bool(
+        patchable
+        and not counterevidence
+        and (mechanism or equivalent_mechanism)
+    )
+    return {
+        "path_role": role,
+        "patchable": patchable,
+        "read_verified": read_verified,
+        "quote_supported": quote_supported,
+        "entity_supported": entity_supported,
+        "grounded": grounded,
+        "direct_flow": direct_flow,
+        "mechanism_verified": mechanism,
+        "equivalent_mechanism": equivalent_mechanism,
+        "counterevidence": counterevidence,
+        "lock_eligible": lock_eligible,
+    }
 
 
 def _cross_round_candidate_frontier(
@@ -3546,8 +3676,8 @@ def _cross_round_candidate_frontier(
 
     A best-round checkpoint protects the head of the ranking, but selecting one
     round wholesale can discard useful candidates discovered later. This pass
-    keeps the checkpoint head fixed and permits a very small number of
-    evidence-backed replacements at the tail.
+    protects only source-grounded mechanism candidates and permits bounded
+    evidence-backed replacement at every other position.
     """
 
     selected = list(selected[:top_k])
@@ -3559,11 +3689,11 @@ def _cross_round_candidate_frontier(
     ):
         return selected, {"enabled": False, "reason": "disabled_or_single_round"}
 
-    locked_count = min(
+    lock_limit = min(
         len(selected),
-        _env_int("MYCODE_CROSS_ROUND_LOCKED_HEAD", 5, minimum=1),
+        _env_int("MYCODE_CROSS_ROUND_LOCKED_HEAD", 2, minimum=0),
     )
-    max_replacements = _env_int("MYCODE_CROSS_ROUND_MAX_REPLACEMENTS", 2, minimum=0)
+    max_replacements = _env_int("MYCODE_CROSS_ROUND_MAX_REPLACEMENTS", 4, minimum=0)
     per_round_limit = _env_int(
         "MYCODE_CROSS_ROUND_PER_ROUND_LIMIT",
         max(8, top_k),
@@ -3579,6 +3709,25 @@ def _cross_round_candidate_frontier(
         for item in review.get("candidates", []) or []
         if str(item.get("path") or "")
     }
+    adaptive_locks: list[dict[str, Any]] = []
+    locked_paths: set[str] = set()
+    for rank, item in enumerate(selected, start=1):
+        path = _norm_path(item.path)
+        facts = _candidate_evidence_facts(
+            item,
+            decision=reviewed.get(path) or {},
+            context_paths=context_paths,
+        )
+        if len(locked_paths) < lock_limit and facts["lock_eligible"]:
+            locked_paths.add(path)
+            adaptive_locks.append(
+                {
+                    "path": path,
+                    "rank": rank,
+                    "reason": "verified_source_quote_entity_and_direct_flow",
+                    "evidence": facts,
+                }
+            )
     issue_lower = unquote(str(issue_text or "")).replace("\\", "/").lower()
     issue_tokens = {token for token in tokenize(issue_lower) if len(token) >= 4}
     selected_ranks = {_norm_path(item.path): rank for rank, item in enumerate(selected, start=1)}
@@ -3679,8 +3828,8 @@ def _cross_round_candidate_frontier(
         if len(replacements) >= max_replacements:
             break
         replaceable = [
-            path for path in selected_paths[locked_count:]
-            if path not in replacement_additions
+            path for path in selected_paths
+            if path not in locked_paths and path not in replacement_additions
         ]
         if not replaceable:
             break
@@ -3716,8 +3865,10 @@ def _cross_round_candidate_frontier(
         fused.append(item)
     return fused[:top_k], {
         "enabled": True,
-        "strategy": "locked_head_evidence_backed_cross_round_tail_fusion",
-        "locked_head": locked_count,
+        "strategy": "adaptive_evidence_locks_with_cross_round_fusion",
+        "locked_head": len(locked_paths),
+        "lock_limit": lock_limit,
+        "adaptive_locks": adaptive_locks,
         "max_replacements": max_replacements,
         "candidate_count": len(representatives),
         "strong_challenger_count": len(challengers),
@@ -3943,6 +4094,21 @@ def _precision_rerank_locations(
                 or (read_verified and (grounded or direct_component))
             )
         )
+        role_allowed_at_head = bool(
+            role not in _CLOSURE_BLOCKED_ROLES
+            or _issue_allows_non_source_targets(issue_text)
+            or (role == "declaration_or_schema" and declaration_requested)
+        )
+        head_eligible = bool(
+            role_allowed_at_head
+            and read_verified
+            and not counterevidence
+            and (
+                mechanism
+                or (quote_supported and entity_supported and direct_component)
+                or implementation_evidence
+            )
+        )
 
         item.score_components["precision_evidence_quality"] = round(quality, 3)
         item.belief["precision_rerank"] = {
@@ -3956,22 +4122,26 @@ def _precision_rerank_locations(
             "counterevidence_grounded": counterevidence_grounded,
             "strong_top_challenger": strong_top_challenger,
             "stable_top": stable_top,
+            "head_eligible": head_eligible,
+            "role_allowed_at_head": role_allowed_at_head,
             "evidence": evidence_reasons,
         }
         rows.append((quality, base_rank, item, item.belief["precision_rerank"]))
 
-    # Lock Top1 only after source evidence supports it. An uninspected API or
-    # declaration surface remains a navigation seed and can be displaced by a
-    # read, directly connected implementation candidate.
-    rows.sort(
-        key=lambda row: (
-            0 if row[3].get("stable_top") or row[3].get("strong_top_challenger") else 1,
-            -row[0],
-            row[1],
-            row[2].path,
-        )
-    )
-    reranked = [row[2] for row in rows]
+    # Precision evidence answers one question only: which recalled file owns
+    # the head position? The remaining recall order is deliberately preserved.
+    head_limit = min(len(rows), _env_int("MYCODE_LLM_REVIEW_CANDIDATES", 8, minimum=1))
+    margin = _env_float("MYCODE_HEAD_REPLACEMENT_MARGIN", 3.0, minimum=0.0)
+    incumbent = rows[0]
+    eligible = [row for row in rows[:head_limit] if row[3].get("head_eligible")]
+    chosen = incumbent
+    if eligible:
+        challenger = max(eligible, key=lambda row: (row[0], -row[1]))
+        incumbent_eligible = bool(incumbent[3].get("head_eligible"))
+        if not incumbent_eligible or challenger[0] >= incumbent[0] + margin:
+            chosen = challenger
+    ordered_rows = [chosen] + [row for row in rows if row[2].path != chosen[2].path]
+    reranked = [row[2] for row in ordered_rows]
     changes = [
         {
             "path": item.path,
@@ -3980,13 +4150,18 @@ def _precision_rerank_locations(
             "quality": round(quality, 3),
             "evidence": diagnostics.get("evidence", [])[:8],
         }
-        for position, (quality, base_rank, item, diagnostics) in enumerate(rows, start=1)
+        for position, (quality, base_rank, item, diagnostics) in enumerate(ordered_rows, start=1)
         if position != base_rank
     ]
     return reranked, {
         "enabled": True,
-        "strategy": "bounded_source_grounded_cross_round_precision_rerank",
+        "strategy": "verified_head_selector_tail_preserving",
         "candidate_count": len(reranked),
+        "head_candidate_limit": head_limit,
+        "replacement_margin": margin,
+        "head_replaced": chosen[1] != 1,
+        "selected_head": chosen[2].path,
+        "selected_head_quality": round(chosen[0], 3),
         "top_before": [item.path for item in ranked[:5]],
         "top_after": [item.path for item in reranked[:5]],
         "changes": changes[:12],
@@ -4014,7 +4189,7 @@ def _run_search_round(
     with phase_context("dynamic.controller", round_no=round_no, seed_count=len(provisional_seed_files), query_count=len(queries)):
         controller_decisions = decide_next_actions(
             round_no=round_no,
-            issue_text=sample.issue_text,
+            issue_text=_issue_query_text(sample.issue_text),
             evidence_result=evidence_result,
             queries=queries,
             previous_top_paths=previous_top_paths,
@@ -4024,7 +4199,7 @@ def _run_search_round(
         )
         actions = select_navigation_actions(
             round_no=round_no,
-            issue_text=sample.issue_text,
+            issue_text=_issue_query_text(sample.issue_text),
             evidence_result=evidence_result,
             queries=queries,
             previous_top_paths=previous_top_paths,
@@ -4167,6 +4342,12 @@ def _run_search_round(
             allowed_paths=round_pool,
             limit=30,
         )
+        visual_file_hits = _scoped_search_files(
+            index,
+            _sanitize_retrieval_queries(frontier_queries.get("visual", []), limit=30),
+            allowed_paths=round_pool,
+            limit=20,
+        )
         concern_file_hits = _scoped_search_files(
             index,
             _sanitize_retrieval_queries(frontier_queries.get("concern", []), limit=50),
@@ -4190,6 +4371,7 @@ def _run_search_round(
             "dynamic.scoped_search",
             explicit_entity_hits=len(explicit_entity_hits),
             evidence_file_hits=len(evidence_file_hits),
+            visual_file_hits=len(visual_file_hits),
             concern_file_hits=len(concern_file_hits),
             effect_file_hits=len(effect_file_hits),
             flow_file_hits=len(flow_file_hits),
@@ -4292,6 +4474,8 @@ def _run_search_round(
         add(hit.path, hit.score * 1.15, "concern_search:" + ",".join(hit.reasons[:5]), component="concern_score")
     for hit in evidence_file_hits:
         add(hit.path, hit.score * 0.95, "evidence_role_search:" + ",".join(hit.reasons[:5]), component="evidence_score")
+    for hit in visual_file_hits:
+        add(hit.path, hit.score * 0.25, "visual_navigation_unverified:" + ",".join(hit.reasons[:5]), component="visual_score")
     for hit in effect_file_hits:
         add(hit.path, hit.score * 0.9, "effect_search:" + ",".join(hit.reasons[:5]), component="concern_score")
     for hit in flow_file_hits:
@@ -4447,7 +4631,7 @@ def _run_search_round(
         ):
             candidate_review = review_candidates(
                 llm=controller_llm,
-                issue_text=sample.issue_text,
+                issue_text=_issue_query_text(sample.issue_text),
                 issue_sketch=build_issue_sketch(sample, evidence_result),
                 ranked=ranked,
                 code_contexts=code_contexts,
@@ -4503,6 +4687,9 @@ def _run_search_round(
                         "evidence_quote": str(reviewed.get("evidence_quote") or "")[:240],
                         "quote_supported": bool(reviewed.get("quote_supported", False)),
                         "entity_supported": bool(reviewed.get("entity_supported", False)),
+                        "supported_entities": list(reviewed.get("supported_entities", []) or [])[:8],
+                        "unsupported_entities": list(reviewed.get("unsupported_entities", []) or [])[:8],
+                        "direct_flow_supported": bool(reviewed.get("direct_flow_supported", False)),
                         "mechanism_verified": bool(reviewed.get("mechanism_verified", False)),
                         "patch_mechanism": str(reviewed.get("patch_mechanism") or "")[:400],
                     }
@@ -4657,7 +4844,7 @@ def _run_search_round(
         "query_groups": {
             key: values[:30]
             for key, values in frontier_queries.items()
-            if key in {"explicit_entity", "evidence_role", "concern", "effect", "flow", "program"}
+            if key in {"explicit_entity", "evidence_role", "visual", "concern", "effect", "flow", "program"}
         },
         "agent_round_questions": _round_belief_questions(ranked),
         "round_progress": round_progress,
@@ -4926,7 +5113,7 @@ def _rerank_entities_with_roles(
     flow_support = _flow_entity_support(flow_traces)
     issue_and_evidence_text = "\n".join(
         [
-            sample.issue_text,
+            _issue_query_text(sample.issue_text),
             repr(evidence_result.get("evidence_packet", {})),
             repr(evidence_result.get("deterministic_understanding", {})),
             repr(evidence_result.get("evidence_synthesis", {})),
@@ -6219,6 +6406,8 @@ def _build_modification_closure(
                 "read_verified": bool(item.get("read_verified")),
                 "read_evidence_sources": item.get("read_evidence_sources", []),
                 "mechanism_verified": bool(item.get("mechanism_verified")),
+                "quote_supported": bool(item.get("quote_supported")),
+                "entity_supported": bool(item.get("entity_supported")),
                 "flow_families": item.get("flow_families", []),
                 "task_relevant_direct_flow": _closure_has_task_relevant_direct_flow(item, obligations),
                 "counterevidence": item.get("counterevidence", []),
@@ -6262,15 +6451,23 @@ def _rerank_with_modification_closure(
 ) -> tuple[list[RankedLocation], dict[str, Any]]:
     """Promote verified patch targets without changing the recalled file set."""
 
-    if not ranked or not closure.get("complete"):
-        return ranked[:top_k], {"applied": False, "reason": "closure_not_complete"}
-    candidates = {
-        _norm_path(str(item.get("path") or "")): item
+    if not ranked:
+        return ranked[:top_k], {"applied": False, "reason": "empty_ranking"}
+    verified_candidates = [
+        item
         for item in closure.get("candidates", []) or []
         if item.get("role") == "patch_target"
         and item.get("read_verified")
         and not item.get("counterevidence")
-        and (item.get("mechanism_verified") or item.get("task_relevant_direct_flow"))
+        and item.get("mechanism_verified")
+        and item.get("quote_supported")
+        and item.get("entity_supported")
+    ]
+    if not closure.get("complete"):
+        verified_candidates = verified_candidates[:1]
+    candidates = {
+        _norm_path(str(item.get("path") or "")): item
+        for item in verified_candidates
     }
     if not candidates:
         return ranked[:top_k], {"applied": False, "reason": "no_verified_patch_target"}
@@ -6299,12 +6496,89 @@ def _rerank_with_modification_closure(
     updated.sort(key=lambda row: (row[0], row[1]))
     return [row[2] for row in updated[:top_k]], {
         "applied": bool(adjustments),
-        "strategy": "bounded_verified_patch_target_promotion",
+        "strategy": (
+            "complete_verified_patch_target_block_promotion"
+            if closure.get("complete")
+            else "partial_verified_root_promotion"
+        ),
+        "closure_complete": bool(closure.get("complete")),
         "margin_ratio": margin_ratio,
         "minimum_margin": minimum_margin,
         "adjustments": adjustments,
         "preserved_candidate_set": True,
     }
+
+
+def _transfer_artifact_evidence(
+    ranked: list[RankedLocation],
+    index: RepositoryIndex,
+) -> tuple[list[RankedLocation], list[dict[str, Any]]]:
+    """Attach bundle evidence to an already recalled source counterpart."""
+
+    by_basename: dict[str, list[str]] = defaultdict(list)
+    for path in index.files:
+        if _path_role(path) not in _CLOSURE_BLOCKED_ROLES and path.startswith("src/"):
+            by_basename[Path(path).name.lower()].append(path)
+    copies = [copy.deepcopy(item) for item in ranked]
+    by_path = {_norm_path(item.path): item for item in copies}
+    mappings: list[dict[str, Any]] = []
+    for artifact in copies:
+        if _path_role(artifact.path) != "generated_or_lockfile":
+            continue
+        filename = Path(artifact.path).name.lower()
+        source_name = re.sub(r"\.(?:esm|umd|min|bundle)(?=\.)", "", filename)
+        counterparts = sorted(by_basename.get(source_name, []), key=lambda path: (path.count("/"), path))
+        if not counterparts:
+            continue
+        source_path = counterparts[0]
+        source = by_path.get(source_path)
+        transferred = source is not None
+        mapping = {
+            "artifact": artifact.path,
+            "source": source_path,
+            "transferred_to_recalled_source": transferred,
+        }
+        artifact.belief["artifact_of"] = source_path
+        if source is not None:
+            source.belief.setdefault("artifact_navigation_from", []).append(artifact.path)
+            source.reasons.append(f"artifact_navigation_from:{artifact.path}")
+            source.score_components["artifact_source_mapping"] = 1.0
+        mappings.append(mapping)
+    return copies, mappings
+
+
+def _rank_stage_snapshot(
+    ranked: Iterable[RankedLocation],
+    *,
+    locks: Iterable[dict[str, Any]] = (),
+    replacements: Iterable[dict[str, Any]] = (),
+    limit: int = 15,
+) -> list[dict[str, Any]]:
+    lock_reasons = {str(item.get("path") or ""): str(item.get("reason") or "") for item in locks}
+    replacement_reasons = {
+        str(item.get("added") or ""): f"replaced:{item.get('removed')}"
+        for item in replacements
+    }
+    rows: list[dict[str, Any]] = []
+    for rank, item in enumerate(list(ranked)[:limit], start=1):
+        precision = (item.belief or {}).get("precision_rerank") or {}
+        review = (item.belief or {}).get("llm_candidate_review") or {}
+        rows.append(
+            {
+                "path": item.path,
+                "rank": rank,
+                "original_rank": precision.get("base_rank", rank),
+                "path_role": _path_role(item.path),
+                "score": round(float(item.score or 0.0), 4),
+                "evidence_quality": precision.get("quality"),
+                "read_verified": bool((item.belief or {}).get("read_verified")),
+                "mechanism_verified": bool(review.get("mechanism_verified")),
+                "evidence_sources": list((item.belief or {}).get("supporting_axes", []) or [])[:8],
+                "lock_reason": lock_reasons.get(_norm_path(item.path)),
+                "replacement_reason": replacement_reasons.get(_norm_path(item.path)),
+            }
+        )
+    return rows
 
 
 def _save_dynamic_localization_checkpoint(
@@ -6362,6 +6636,18 @@ def _save_dynamic_localization_checkpoint(
         "react_agent_trace": copy.deepcopy(react_agent),
         "dynamic_rounds": [item.to_dict() for item in rounds],
         "best_round_selection": round_selection,
+        "rank_stage_snapshots": {
+            "rounds": {
+                str(item.round_no): _rank_stage_snapshot(item.ranked_locations)
+                for item in rounds
+            },
+            "best_round": _rank_stage_snapshot(selected_round.ranked_locations),
+        },
+        "head_selection": {"enabled": False, "reason": "not_run_partial_checkpoint"},
+        "adaptive_locks": [],
+        "artifact_mappings": [],
+        "external_reproduction_evidence": [],
+        "checkpoint_list_quality": round_selection["selected_quality"],
         "agent_trace": [
             {
                 "round_no": item.round_no,
@@ -6445,7 +6731,7 @@ def dynamic_localize(
 
     fast_seed_plan = plan_fast_seeds(
         index=index,
-        issue_text=sample.issue_text,
+        issue_text=_issue_query_text(sample.issue_text),
         query_groups=query_groups,
         evidence_result=evidence_result,
         controller_llm=controller_llm,
@@ -6862,8 +7148,11 @@ def dynamic_localize(
         checkpoint_quality = _round_checkpoint_quality(search_round)
         search_round.frontier_state["checkpoint_quality"] = checkpoint_quality
         minimum_gain = _env_float("MYCODE_BEST_ROUND_MIN_GAIN", 0.15, minimum=0.0)
-        previous_best_score = float(best_round_quality.get("score") or -1.0)
-        selected = best_round is None or float(checkpoint_quality.get("score") or -1.0) > previous_best_score + minimum_gain
+        selected = best_round is None or _checkpoint_is_better(
+            checkpoint_quality,
+            best_round_quality,
+            minimum_gain=minimum_gain,
+        )
         if selected:
             best_round = search_round
             best_round_quality = checkpoint_quality
@@ -6946,22 +7235,41 @@ def dynamic_localize(
     merged_candidate_review = _merge_closure_candidate_reviews(
         [item.verifier for item in rounds]
     )
+    rank_stage_snapshots: dict[str, Any] = {
+        "fast_seed": _rank_stage_snapshot(
+            [item for item in initial_seed_ranking if item.path in fast_seed_paths],
+            limit=top_k,
+        ),
+        "rounds": {
+            str(item.round_no): _rank_stage_snapshot(item.ranked_locations, limit=top_k)
+            for item in rounds
+        },
+        "best_round": _rank_stage_snapshot(ranked, limit=top_k),
+    }
+    ranked, artifact_mappings = _transfer_artifact_evidence(ranked, index)
     ranked, cross_round_frontier = _cross_round_candidate_frontier(
         selected=ranked,
         round_rankings=[initial_seed_ranking] + [item.ranked_locations for item in rounds],
-        issue_text=sample.issue_text,
+        issue_text=_issue_query_text(sample.issue_text),
         review=merged_candidate_review,
         code_contexts=code_contexts,
         top_k=top_k,
+    )
+    rank_stage_snapshots["cross_round_frontier"] = _rank_stage_snapshot(
+        ranked,
+        locks=cross_round_frontier.get("adaptive_locks", []) or [],
+        replacements=cross_round_frontier.get("replacements", []) or [],
+        limit=top_k,
     )
     ranked, precision_rerank = _precision_rerank_locations(
         ranked=ranked,
         round_rankings=[initial_seed_ranking] + [item.ranked_locations for item in rounds],
-        issue_text=sample.issue_text,
+        issue_text=_issue_query_text(sample.issue_text),
         review=merged_candidate_review,
         code_contexts=code_contexts,
         top_k=top_k,
     )
+    rank_stage_snapshots["head_selector"] = _rank_stage_snapshot(ranked, limit=top_k)
     round_selection = {
         "enabled": use_checkpoint,
         "selected_round": selected_round.round_no,
@@ -7032,6 +7340,7 @@ def dynamic_localize(
         modification_closure,
         top_k=top_k,
     )
+    rank_stage_snapshots["modification_closure"] = _rank_stage_snapshot(ranked, limit=top_k)
     modification_closure["ranking_adjustment"] = closure_rerank
     modification_closure["ranking_kept_separate"] = not bool(closure_rerank.get("applied"))
     phase_event(
@@ -7053,6 +7362,13 @@ def dynamic_localize(
         flow_traces=flow_traces,
         verifier=verifier,
     )
+    external_reproduction_evidence = [
+        evidence
+        for observation in tool_observations
+        for evidence in (observation.get("extracted", {}) or {}).get(
+            "external_reproduction_evidence", []
+        ) or []
+    ]
     return {
         "instance_id": sample.instance_id,
         "repo": sample.repo,
@@ -7069,6 +7385,12 @@ def dynamic_localize(
         "react_agent_trace": react_agent,
         "dynamic_rounds": [item.to_dict() for item in rounds],
         "best_round_selection": round_selection,
+        "rank_stage_snapshots": rank_stage_snapshots,
+        "head_selection": precision_rerank,
+        "adaptive_locks": cross_round_frontier.get("adaptive_locks", []) or [],
+        "artifact_mappings": artifact_mappings,
+        "external_reproduction_evidence": external_reproduction_evidence,
+        "checkpoint_list_quality": round_selection.get("selected_quality", {}),
         "agent_trace": [
             {
                 "round_no": item.round_no,

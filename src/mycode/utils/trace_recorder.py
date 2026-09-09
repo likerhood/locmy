@@ -283,6 +283,11 @@ def compact_agent_trace(result: dict[str, Any]) -> dict[str, Any]:
             "trace": modification_closure.get("trace", [])[:8],
             "ranking_adjustment": modification_closure.get("ranking_adjustment", {}),
         },
+        "rank_stage_snapshots": localization.get("rank_stage_snapshots", {}),
+        "head_selection": localization.get("head_selection", {}),
+        "adaptive_locks": localization.get("adaptive_locks", [])[:4],
+        "artifact_mappings": localization.get("artifact_mappings", [])[:12],
+        "checkpoint_list_quality": localization.get("checkpoint_list_quality", {}),
         "ranked": {
             "files": _top_paths(localization.get("ranked_locations") or []),
             "modules": _top_entities(localization.get("ranked_modules") or []),

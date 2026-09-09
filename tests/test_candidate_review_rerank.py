@@ -76,7 +76,7 @@ def test_candidate_review_recovers_complete_candidate_from_truncated_json() -> N
         issue_sketch=_Sketch(),
         ranked=ranked,
         code_contexts=contexts,
-        flow_traces=[],
+        flow_traces=[{"candidate_target_paths": ["src/io/files.js"], "flow_type": "dataflow"}],
         round_no=1,
         candidate_limit=2,
         repair_attempts=0,
@@ -87,6 +87,78 @@ def test_candidate_review_recovers_complete_candidate_from_truncated_json() -> N
     assert review["recovered_from_truncated_json"] is True
     assert [item["path"] for item in review["candidates"]] == ["src/io/files.js"]
     assert review["candidates"][0]["mechanism_verified"] is True
+
+
+def test_candidate_review_keeps_supported_entities_when_one_is_invented() -> None:
+    ranked = [
+        RankedLocation(
+            path="src/parser.js",
+            score=90.0,
+            score_components={"flow_score": 8.0},
+        )
+    ]
+
+    def fake_llm(_prompt: str) -> str:
+        return (
+            '{"candidates":[{"path":"src/parser.js","role":"patch_target",'
+            '"confidence":0.9,"evidence_quote":"function tokenize(input)",'
+            '"mechanism_verified":true,"patch_mechanism":"tokenize applies the parser rule",'
+            '"matched_issue_axes":["concern","flow"],'
+            '"entities":[{"kind":"function","name":"tokenize"},'
+            '{"kind":"function","name":"inventedHelper"}]}],'
+            '"continue_search":false,"missing_evidence":[],"next_queries":[]}'
+        )
+
+    review = review_candidates(
+        llm=fake_llm,
+        issue_text="The tokenizer applies the wrong parser rule.",
+        issue_sketch=_Sketch(),
+        ranked=ranked,
+        code_contexts=[
+            {"path": "src/parser.js", "snippets": [{"text": "function tokenize(input) { return parse(input); }"}]}
+        ],
+        flow_traces=[{"candidate_target_paths": ["src/parser.js"], "flow_type": "parser_tokenizer_flow"}],
+        round_no=1,
+    )
+    candidate = review["candidates"][0]
+    assert candidate["mechanism_verified"] is True
+    assert candidate["supported_entities"] == [{"kind": "function", "name": "tokenize"}]
+    assert candidate["unsupported_entities"] == [{"kind": "function", "name": "inventedHelper"}]
+
+
+def test_candidate_review_reuses_unchanged_source_evidence() -> None:
+    calls = 0
+
+    def fake_llm(_prompt: str) -> str:
+        nonlocal calls
+        calls += 1
+        return (
+            '{"candidates":[{"path":"src/cache_target.py","role":"navigation_only",'
+            '"confidence":0.4,"matched_issue_axes":[],"entities":[]}],'
+            '"continue_search":true,"missing_evidence":[],"next_queries":[]}'
+        )
+
+    kwargs = {
+        "llm": fake_llm,
+        "issue_text": "Unique cache review issue 91427",
+        "issue_sketch": _Sketch(),
+        "code_contexts": [{"path": "src/cache_target.py", "snippets": [{"text": "def target(): pass"}]}],
+        "flow_traces": [],
+        "candidate_limit": 3,
+    }
+    first = review_candidates(
+        ranked=[RankedLocation(path="src/cache_target.py", score=10.0)],
+        round_no=1,
+        **kwargs,
+    )
+    second = review_candidates(
+        ranked=[RankedLocation(path="src/cache_target.py", score=999.0)],
+        round_no=2,
+        **kwargs,
+    )
+    assert calls == 1
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is True
 
 
 def test_round_checkpoint_prefers_verified_mechanism_over_later_architecture_guess() -> None:
@@ -164,7 +236,7 @@ def test_candidate_review_repairs_json_and_reranks_patch_target() -> None:
         issue_sketch=_Sketch(),
         ranked=ranked,
         code_contexts=contexts,
-        flow_traces=[],
+        flow_traces=[{"candidate_target_paths": ["src/io/files.js"], "flow_type": "dataflow"}],
         round_no=1,
         repair_attempts=1,
     )
@@ -360,6 +432,51 @@ def test_issue_sketch_keeps_url_artifacts_out_of_state_and_entities() -> None:
     assert "v0.6.1" not in sketch.entities
 
 
+def test_demo_url_query_does_not_create_route_flow_for_parser_issue() -> None:
+    issue = (
+        "Marked emphasis parsing fails in this "
+        "[playground](https://example.test/demo?baseUrl=null&route=preview)."
+    )
+    sample = NormalizedSample(
+        instance_id="markedjs__marked-2627",
+        repo="markedjs/marked",
+        dataset="unit",
+        issue_text=issue,
+        raw={"problem_statement": issue},
+    )
+    sketch = build_issue_sketch(
+        sample,
+        {
+            "evidence_packet": {"code_references": [], "url_inspections": [], "image_inspections": []},
+            "evidence_synthesis": {},
+            "tool_observations": [],
+        },
+    )
+    flow_types = {item["flow_type"] for item in sketch.flow_obligations}
+    assert "parser_tokenizer_flow" in flow_types
+    assert "url_builder_or_route_flow" not in flow_types
+
+
+def test_natural_language_redirect_still_creates_route_flow() -> None:
+    issue = "The account link redirects to the wrong route after saving."
+    sample = NormalizedSample(
+        instance_id="example__project-1",
+        repo="example/project",
+        dataset="unit",
+        issue_text=issue,
+        raw={"problem_statement": issue},
+    )
+    sketch = build_issue_sketch(
+        sample,
+        {
+            "evidence_packet": {"code_references": [], "url_inspections": [], "image_inspections": []},
+            "evidence_synthesis": {},
+            "tool_observations": [],
+        },
+    )
+    assert "url_builder_or_route_flow" in {item["flow_type"] for item in sketch.flow_obligations}
+
+
 def test_early_stop_requires_grounded_review_or_stability() -> None:
     ranked = [
         RankedLocation(
@@ -391,7 +508,7 @@ def test_early_stop_requires_grounded_review_or_stability() -> None:
     assert decision["reason"] == "candidate_review_has_critical_evidence_gap"
 
 
-def test_evidence_plateau_overrides_reviewer_request_after_budget() -> None:
+def test_evidence_plateau_does_not_hide_required_review_evidence() -> None:
     ranked = [RankedLocation(path="src/io/files.js", score=100.0)]
     decision = _stop_decision(
         round_no=3,
@@ -406,8 +523,8 @@ def test_evidence_plateau_overrides_reviewer_request_after_budget() -> None:
         },
         round_progress={"plateau_streak": 2},
     )
-    assert decision["stop"] is True
-    assert decision["reason"] == "evidence_plateau_with_unresolved_gap"
+    assert decision["stop"] is False
+    assert decision["reason"] == "candidate_review_requests_more_evidence"
 
 
 def test_round_progress_collapses_term_only_flow_churn_into_one_family() -> None:
@@ -783,9 +900,11 @@ def test_closure_rerank_promotes_verified_target_without_changing_recall_set() -
                     "path": "src/target.js",
                     "role": "patch_target",
                     "confidence": 1.0,
-                    "read_verified": True,
-                    "mechanism_verified": True,
-                    "counterevidence": [],
+                        "read_verified": True,
+                        "mechanism_verified": True,
+                        "quote_supported": True,
+                        "entity_supported": True,
+                        "counterevidence": [],
                 }
             ],
         },
@@ -794,6 +913,44 @@ def test_closure_rerank_promotes_verified_target_without_changing_recall_set() -
     assert reranked[0].path == "src/target.js"
     assert {item.path for item in reranked} == {item.path for item in ranked}
     assert diagnostics["applied"] is True
+
+
+def test_partial_closure_promotes_only_verified_root_mechanism() -> None:
+    ranked = [
+        RankedLocation(path="src/context.js", score=100.0),
+        RankedLocation(path="src/root.js", score=90.0),
+        RankedLocation(path="src/flow_only.js", score=80.0),
+    ]
+    reranked, diagnostics = _rerank_with_modification_closure(
+        ranked,
+        {
+            "complete": False,
+            "candidates": [
+                {
+                    "path": "src/root.js",
+                    "role": "patch_target",
+                    "confidence": 0.9,
+                    "read_verified": True,
+                    "quote_supported": True,
+                    "entity_supported": True,
+                    "mechanism_verified": True,
+                    "counterevidence": [],
+                },
+                {
+                    "path": "src/flow_only.js",
+                    "role": "patch_target",
+                    "confidence": 0.99,
+                    "read_verified": True,
+                    "task_relevant_direct_flow": True,
+                    "mechanism_verified": False,
+                    "counterevidence": [],
+                },
+            ],
+        },
+        top_k=3,
+    )
+    assert [item.path for item in reranked] == ["src/root.js", "src/context.js", "src/flow_only.js"]
+    assert diagnostics["strategy"] == "partial_verified_root_promotion"
 
 
 def test_candidate_review_exact_entity_improves_function_grounding() -> None:
@@ -1140,12 +1297,15 @@ def test_precision_rerank_promotes_grounded_mechanism_over_generic_rank_one() ->
     )
     assert reranked[0].path == "src/ownership.js"
     assert {item.path for item in reranked} == {item.path for item in ranked}
-    assert diagnostics["strategy"] == "bounded_source_grounded_cross_round_precision_rerank"
+    assert diagnostics["strategy"] == "verified_head_selector_tail_preserving"
     assert diagnostics["top_before"][0] == "src/state/selectors.js"
+    assert [item.path for item in reranked[1:]] == [item.path for item in ranked if item.path != "src/ownership.js"]
 
 
 def test_source_first_classifies_common_compiled_bundle_suffixes() -> None:
     assert _path_role("lib/library.umd.js") == "generated_or_lockfile"
+    assert _path_role("lib/marked.esm.js") == "generated_or_lockfile"
+    assert _path_role("client/lib/runtime.js") == "implementation"
     assert _path_role("public/app.min.css") == "generated_or_lockfile"
 
 
@@ -1186,6 +1346,93 @@ def test_cross_round_frontier_preserves_head_and_recovers_read_tail_candidate() 
     assert [item.path for item in fused[:5]] == [item.path for item in selected[:5]]
     assert fused[5].path == "src/ownership.py"
     assert diagnostics["replacements"][0]["removed"] == "src/selected_6.py"
+
+
+def test_cross_round_frontier_locks_only_verified_candidates(monkeypatch) -> None:
+    monkeypatch.setenv("MYCODE_CROSS_ROUND_LOCKED_HEAD", "2")
+    selected = [
+        RankedLocation(path="src/weak_seed.py", score=100.0),
+        RankedLocation(path="src/verified_a.py", score=95.0, score_components={"flow_score": 2.0}),
+        RankedLocation(path="src/verified_b.py", score=90.0, score_components={"call_score": 2.0}),
+        RankedLocation(path="src/tail.py", score=85.0),
+    ]
+    review_candidates_data = []
+    contexts = []
+    for path in ("src/verified_a.py", "src/verified_b.py"):
+        review_candidates_data.append(
+            {
+                "path": path,
+                "grounded": True,
+                "quote_supported": True,
+                "entity_supported": True,
+                "mechanism_verified": True,
+            }
+        )
+        contexts.append({"path": path, "snippets": [{"text": "def verified(): pass"}]})
+    fused, diagnostics = _cross_round_candidate_frontier(
+        selected=selected,
+        round_rankings=[selected, selected],
+        issue_text="Fix the verified behavior.",
+        review={"candidates": review_candidates_data},
+        code_contexts=contexts,
+        top_k=4,
+    )
+    assert [item["path"] for item in diagnostics["adaptive_locks"]] == [
+        "src/verified_a.py",
+        "src/verified_b.py",
+    ]
+    assert "src/weak_seed.py" not in {item["path"] for item in diagnostics["adaptive_locks"]}
+    assert [item.path for item in fused] == [item.path for item in selected]
+
+
+def test_representative_failure_trajectories_recover_target_into_top_six(monkeypatch) -> None:
+    monkeypatch.setenv("MYCODE_CROSS_ROUND_LOCKED_HEAD", "2")
+    monkeypatch.setenv("MYCODE_CROSS_ROUND_MAX_REPLACEMENTS", "4")
+    monkeypatch.setenv("MYCODE_CROSS_ROUND_REPLACEMENT_MARGIN", "0")
+    fixture = Path(__file__).parent / "fixtures" / "front_rank_failure_cases.json"
+    for case in json.loads(fixture.read_text(encoding="utf-8")):
+        selected = [
+            RankedLocation(path=path, score=100.0 - rank)
+            for rank, path in enumerate(case["selected"])
+        ]
+        target = RankedLocation(
+            path=case["target"],
+            score=98.0,
+            score_components={"flow_score": 8.0},
+            belief={"read_verified": True},
+        )
+        review = {
+            "candidates": [
+                {
+                    "path": case["target"],
+                    "role": "patch_target",
+                    "confidence": 0.95,
+                    "grounded": True,
+                    "quote_supported": True,
+                    "entity_supported": True,
+                    "direct_flow_supported": True,
+                    "mechanism_verified": True,
+                }
+            ]
+        }
+        contexts = [{"path": case["target"], "snippets": [{"text": "verified source mechanism"}]}]
+        fused, _diagnostics = _cross_round_candidate_frontier(
+            selected=selected,
+            round_rankings=[selected, [target, *selected[:5]]],
+            issue_text=case["issue"],
+            review=review,
+            code_contexts=contexts,
+            top_k=6,
+        )
+        reranked, _head = _precision_rerank_locations(
+            ranked=fused,
+            round_rankings=[selected, [target, *selected[:5]]],
+            issue_text=case["issue"],
+            review=review,
+            code_contexts=contexts,
+            top_k=6,
+        )
+        assert case["target"] in [item.path for item in reranked[:6]], case["instance_id"]
 
 
 def test_closure_inherits_read_verification_from_candidate_belief() -> None:

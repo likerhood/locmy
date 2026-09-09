@@ -210,6 +210,20 @@ MYCODE_AUTO_FETCH_REPOS=0 bash newtest/run_swe_clean15_full.sh
 - `failures.jsonl`: 异常样本。
 - `run.log`: shell 层运行日志。
 
+深度定位还会在 `localization.rank_stage_snapshots` 中记录 FastSeed、每轮检索、
+最佳轮、跨轮融合、HeadSelector 和修改闭包后的前 15 名。默认排序采用
+`10 recall -> 6 responsibility -> 3 active seeds`，最多锁定两个已有源码机制证据的
+候选；最终 HeadSelector 只裁决 Top-1，其余候选保持原相对顺序。
+
+运行完成后可生成阶段级 File Acc/MRR 报告：
+
+```bash
+python scripts/evaluate_rank_stages.py result/<run-directory>
+```
+
+报告写入 `rank_stage_metrics.md` 和 `rank_stage_metrics.json`。工具优先读取体积较小的
+`agent_traces.jsonl`，用于定位究竟是哪一阶段改善或损害了 Acc@1-6。
+
 ## 重评估已有结果
 
 如果已经有 `localization_results.jsonl`，只想按最新三层评估口径重新输出表格，不需要重新跑定位：

@@ -1,0 +1,26 @@
+[
+  {
+    "instance_id": "Chart.js-10806",
+    "issue": "Arc drawing behavior is incorrect while rendering a chart.",
+    "selected": ["src/plugins/plugin.legend.js", "src/core/core.controller.js", "src/helpers/helpers.canvas.js", "src/core/core.datasetController.js", "src/types/index.d.ts", "test/spec.js"],
+    "target": "src/elements/element.arc.ts"
+  },
+  {
+    "instance_id": "marked-2627",
+    "issue": "Marked emphasis tokenization applies the wrong parsing rule.",
+    "selected": ["lib/marked.esm.js", "src/Parser.js", "src/Renderer.js", "src/helpers.js", "docs/demo.md", "test/parser.js"],
+    "target": "src/Lexer.js"
+  },
+  {
+    "instance_id": "wp-calypso-26335",
+    "issue": "Saving a post must update application state through its action.",
+    "selected": ["client/components/accordion/index.jsx", "client/reader/view.jsx", "client/posts/form.jsx", "client/state/selectors.js", "client/routes.js", "test/posts.js"],
+    "target": "client/state/posts/actions.js"
+  },
+  {
+    "instance_id": "p5.js-3709",
+    "issue": "WebGL shader rendering fails in the RendererGL call chain.",
+    "selected": ["src/webgl/p5.Shader.js", "src/webgl/p5.Camera.js", "src/events/mouse.js", "src/core/main.js", "docs/webgl.md", "test/webgl.js"],
+    "target": "src/webgl/p5.RendererGL.js"
+  }
+]

@@ -51,6 +51,7 @@ def _parse_github(url: str) -> Dict[str, Any]:
     }
     if len(parts) >= 2:
         result["repo"] = f"{parts[0]}/{parts[1]}"
+        result["github_kind"] = "repository"
 
     if len(parts) >= 4 and parts[2] == "blob":
         result["github_kind"] = "code"
@@ -70,6 +71,17 @@ def _parse_github(url: str) -> Dict[str, Any]:
         result["commit"] = parts[3] if len(parts) > 3 else None
     elif len(parts) >= 3 and parts[2] == "compare":
         result["github_kind"] = "diff_or_compare"
+    elif len(parts) >= 4 and parts[2] == "tree":
+        result["github_kind"] = "tree"
+        result["ref"] = parts[3]
+        result["path"] = "/".join(parts[4:]) if len(parts) > 4 else None
+    elif len(parts) >= 3 and parts[2] == "search":
+        result["github_kind"] = "search"
+        result["search_terms"] = [
+            term
+            for value in parse_qs(parsed.query).get("q", [])[:2]
+            for term in re.findall(r"[A-Za-z_$][A-Za-z0-9_$.-]{2,}", unquote(value))
+        ][:16]
 
     return result
 
@@ -151,6 +163,15 @@ def inspect_url(url: str) -> Dict[str, Any]:
                     "risk": "medium",
                     "tool_recommendation": "repo_seed_expand",
                     "localization_use": "use_as_seed_not_target",
+                }
+            )
+        elif gh.get("github_kind") in {"tree", "search", "repository"}:
+            inspection.update(
+                {
+                    "role": "repository_navigation",
+                    "risk": "low",
+                    "tool_recommendation": "repo_seed_expand",
+                    "localization_use": "route_to_local_repository_index",
                 }
             )
         elif gh.get("github_kind") == "issue":

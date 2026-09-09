@@ -14,6 +14,19 @@ LLMController = Callable[[str], str | dict[str, Any]]
 NOISE_PARTS = {"docs", "doc", "test", "tests", "examples", "example", "fixtures", "fixture"}
 
 
+def _source_candidate(path: str) -> bool:
+    normalized = str(path or "").replace("\\", "/").lower()
+    parts = set(Path(normalized).parts)
+    filename = Path(normalized).name
+    if parts & (NOISE_PARTS | {"demo", "demos", "dist", "build", "vendor", "generated"}):
+        return False
+    if filename.endswith((".min.js", ".bundle.js", ".umd.js", ".map")):
+        return False
+    if normalized.startswith("lib/") and filename.endswith((".esm.js", ".esm.mjs", ".esm.cjs")):
+        return False
+    return True
+
+
 def _env_int(name: str, default: int, minimum: int = 1) -> int:
     try:
         return max(minimum, int(os.environ.get(name, default)))
@@ -50,7 +63,10 @@ def _local_code_anchors(evidence_result: dict[str, Any], index: RepositoryIndex)
     return _dedupe(anchors, limit=12)
 
 
-def _parse_selected_paths(raw: str | dict[str, Any], allowed: set[str]) -> list[str]:
+def _parse_selected_paths(
+    raw: str | dict[str, Any],
+    allowed: set[str],
+) -> tuple[list[str], dict[str, dict[str, Any]]]:
     if isinstance(raw, dict):
         raw = raw.get("content", raw)
     if isinstance(raw, dict):
@@ -61,9 +77,25 @@ def _parse_selected_paths(raw: str | dict[str, Any], allowed: set[str]) -> list[
         try:
             payload = json.loads(match.group(0) if match else text)
         except (json.JSONDecodeError, AttributeError):
-            return []
-    paths = payload.get("seed_files", []) if isinstance(payload, dict) else []
-    return _dedupe((path for path in paths if str(path) in allowed), limit=len(allowed))
+            return [], {}
+    entries = payload.get("seed_files", []) if isinstance(payload, dict) else []
+    paths: list[str] = []
+    metadata: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        if isinstance(entry, dict):
+            path = str(entry.get("path") or "")
+            detail = {
+                "role": str(entry.get("role") or "responsibility_candidate"),
+                "evidence_channels": [str(value) for value in entry.get("evidence_channels", []) or []][:6],
+                "expected_mechanism": str(entry.get("expected_mechanism") or "")[:300],
+            }
+        else:
+            path = str(entry or "")
+            detail = {}
+        if path in allowed:
+            paths.append(path)
+            metadata[path] = detail
+    return _dedupe(paths, limit=len(allowed)), metadata
 
 
 def plan_fast_seeds(
@@ -86,17 +118,20 @@ def plan_fast_seeds(
             "enabled": False,
             "strategy": "disabled",
             "candidate_files": [],
+            "responsibility_candidates": [],
             "seed_files": [],
             "persistent_seed_files": [],
             "local_code_anchors": [],
             "llm_status": "disabled",
             "llm_selected_files": [],
             "llm_promoted_files": [],
+            "llm_selections": {},
             "evidence": {},
         }
 
     candidate_limit = _env_int("MYCODE_FAST_SEED_CANDIDATES", 10)
-    seed_limit = min(candidate_limit, _env_int("MYCODE_FAST_SEED_LIMIT", 5))
+    shortlist_limit = min(candidate_limit, _env_int("MYCODE_FAST_SEED_SHORTLIST", 6))
+    seed_limit = min(shortlist_limit, _env_int("MYCODE_FAST_SEED_LIMIT", 3))
     pool_limit = max(candidate_limit * 4, 24)
     scores: dict[str, float] = defaultdict(float)
     channels: dict[str, set[str]] = defaultdict(set)
@@ -141,6 +176,7 @@ def plan_fast_seeds(
     ordered = sorted(scores, key=lambda path: (-scores[path], path))
     candidate_files = _dedupe(local_anchors + ordered, limit=candidate_limit)
     selected: list[str] = []
+    selection_metadata: dict[str, dict[str, Any]] = {}
     llm_status = "disabled"
     use_llm = os.environ.get("MYCODE_FAST_SEED_LLM", "1").strip().lower() not in {"0", "false", "off", "no"}
     if controller_llm is not None and use_llm:
@@ -160,10 +196,17 @@ def plan_fast_seeds(
             "symbols, paths, workflow semantics, or multiple independent channels. Images and reproduction "
             "URLs describe symptoms and are not direct patch evidence by themselves. Return compact JSON only.\n\n"
             f"Issue:\n{issue_text[:5000]}\n\nCandidate Files:\n" + "\n".join(summaries) +
-            f'\n\nSchema: {{"seed_files": ["path"]}}; return at most {seed_limit} paths.'
+            "\n\nChoose responsibility candidates, not guaranteed patch targets. "
+            f"Return at most {shortlist_limit} entries using this schema: "
+            '{"seed_files":[{"path":"exact/path","role":"implementation|supporting|navigation",'
+            '"evidence_channels":["symbol","path","visual","workflow"],'
+            '"expected_mechanism":"short hypothesis"}]}.'
         )
         try:
-            selected = _parse_selected_paths(controller_llm(prompt), set(candidate_files))[:seed_limit]
+            selected, selection_metadata = _parse_selected_paths(
+                controller_llm(prompt), set(candidate_files)
+            )
+            selected = selected[:shortlist_limit]
             llm_status = "ok" if selected else "invalid_or_empty"
         except Exception as exc:  # noqa: BLE001 - deterministic order is the fallback.
             llm_status = f"error:{type(exc).__name__}"
@@ -172,13 +215,22 @@ def plan_fast_seeds(
         path
         for path in selected
         if (
-            len(channels[path]) >= 2
-            or "local_code_url" in channels[path]
-            or "exact_issue_path" in channels[path]
-            or scores[path] >= best_score * 0.75
+            _source_candidate(path)
+            and (
+                len(channels[path]) >= 2
+                or "local_code_url" in channels[path]
+                or "exact_issue_path" in channels[path]
+                or scores[path] >= best_score * 0.75
+            )
         )
     ]
-    seed_files = _dedupe(local_anchors + selected_supported + candidate_files, limit=seed_limit)
+    source_candidates = [path for path in candidate_files if _source_candidate(path)]
+    seed_files = _dedupe(
+        [path for path in local_anchors if _source_candidate(path)]
+        + selected_supported
+        + source_candidates,
+        limit=seed_limit,
+    )
     persistent = [
         path
         for path in candidate_files
@@ -186,14 +238,16 @@ def plan_fast_seeds(
     ]
     return {
         "enabled": True,
-        "strategy": "global_multichannel_candidates_then_bounded_seed_selection",
+        "strategy": "global_10_recall_then_6_responsibility_then_3_active_seeds",
         "candidate_files": candidate_files,
+        "responsibility_candidates": selected,
         "seed_files": seed_files,
         "persistent_seed_files": _dedupe(seed_files + persistent, limit=candidate_limit),
         "local_code_anchors": local_anchors,
         "llm_status": llm_status,
         "llm_selected_files": selected,
         "llm_promoted_files": selected_supported,
+        "llm_selections": selection_metadata,
         "evidence": {
             path: {
                 "channels": sorted(channels[path]),

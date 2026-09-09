@@ -56,17 +56,42 @@ def resolve_github_code_url(
             "ref_policy": "benchmark_base_commit_overrides_url_ref",
         }
     )
-    if result.get("github_kind") != "code":
-        return result
     if expected_repo and str(result.get("repo") or "").lower() != expected_repo.lower():
         result["local_resolution_status"] = "repository_mismatch"
         result["warning"] = "github_url_repository_does_not_match_benchmark_repository"
+        return result
+    github_kind = str(result.get("github_kind") or "")
+    root = Path(repo_root) if repo_root else None
+    if github_kind == "repository":
+        result["local_resolution_status"] = "repository_confirmed" if root and root.is_dir() else "checkout_unavailable"
+        result["localization_use"] = "repository_scope_only"
+        return result
+    if github_kind == "search":
+        result["local_resolution_status"] = "local_search_ready" if root and root.is_dir() else "checkout_unavailable"
+        result["local_search_terms"] = list(result.get("search_terms") or [])[:16]
+        result["localization_use"] = "search_local_repository_index"
+        return result
+    if github_kind == "tree":
+        relative_path = str(result.get("path") or "").strip("/")
+        directory = (root / relative_path).resolve() if root and relative_path else root
+        if root and directory and directory.is_dir():
+            try:
+                directory.relative_to(root.resolve())
+            except ValueError:
+                result["local_resolution_status"] = "unsafe_path"
+            else:
+                result["local_resolution_status"] = "local_tree_ready"
+                result["local_path_prefix"] = relative_path
+                result["localization_use"] = "search_within_local_path_prefix"
+        else:
+            result["local_resolution_status"] = "path_not_found_in_base_commit"
+        return result
+    if github_kind != "code":
         return result
     relative_path = str(result.get("path") or "").lstrip("/")
     if not relative_path:
         result["local_resolution_status"] = "missing_path"
         return result
-    root = Path(repo_root) if repo_root else None
     if root is None or not root.is_dir():
         result["local_resolution_status"] = "checkout_unavailable"
         return result

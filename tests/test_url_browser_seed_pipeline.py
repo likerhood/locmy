@@ -5,6 +5,7 @@ from pathlib import Path
 from mycode.dynamic_retrieval.fast_seed_planner import plan_fast_seeds
 from mycode.evidence.issue_sketch import _evidence_roles
 from mycode.evidence.tools.local_code_url_resolver import resolve_github_code_url
+from mycode.evidence.tools.url_inspector import inspect_url
 from mycode.evidence.tools.vlm_image_reader import normalize_vlm_analysis
 from mycode.repo_index.structure_index import RepositoryIndex
 
@@ -40,6 +41,35 @@ def test_github_blob_rejects_other_repository(tmp_path: Path) -> None:
     )
     assert result["local_resolution_status"] == "repository_mismatch"
     assert "source_excerpt" not in result
+
+
+def test_github_tree_search_and_root_route_to_local_index(tmp_path: Path) -> None:
+    (tmp_path / "src" / "parser").mkdir(parents=True)
+    tree = resolve_github_code_url(
+        "https://github.com/example/project/tree/main/src/parser",
+        repo_root=tmp_path,
+        expected_repo="example/project",
+        base_commit="abc123",
+    )
+    search = resolve_github_code_url(
+        "https://github.com/example/project/search?q=tokenizer+emphasis",
+        repo_root=tmp_path,
+        expected_repo="example/project",
+        base_commit="abc123",
+    )
+    root = resolve_github_code_url(
+        "https://github.com/example/project",
+        repo_root=tmp_path,
+        expected_repo="example/project",
+        base_commit="abc123",
+    )
+    assert tree["local_resolution_status"] == "local_tree_ready"
+    assert tree["local_path_prefix"] == "src/parser"
+    assert search["local_resolution_status"] == "local_search_ready"
+    assert search["local_search_terms"] == ["tokenizer", "emphasis"]
+    assert root["local_resolution_status"] == "repository_confirmed"
+    assert "local_path" not in root
+    assert inspect_url("https://github.com/example/project")["github_kind"] == "repository"
 
 
 def test_failed_browser_observation_is_not_runtime_evidence() -> None:
@@ -118,7 +148,7 @@ def test_fast_seed_planner_is_bounded_and_rejects_invented_paths(
     index = RepositoryIndex(repo_root=tmp_path, repo="example/project", instance_id="x", dataset="unit")
 
     def fake_llm(_prompt: str):
-        return {"content": '{"seed_files":["invented.js","src/actions.js"]}'}
+        return {"content": '{"seed_files":["invented.js","docs/save.md","src/actions.js"]}'}
 
     result = plan_fast_seeds(
         index=index,
@@ -129,5 +159,7 @@ def test_fast_seed_planner_is_bounded_and_rejects_invented_paths(
     )
     assert result["seed_files"][0] == "src/actions.js"
     assert "invented.js" not in result["seed_files"]
+    assert "docs/save.md" not in result["seed_files"]
     assert len(result["candidate_files"]) <= 10
-    assert len(result["seed_files"]) <= 5
+    assert len(result["responsibility_candidates"]) <= 6
+    assert len(result["seed_files"]) <= 3

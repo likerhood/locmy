@@ -11,6 +11,8 @@ from mycode.schemas.evidence import NormalizedSample
 
 IDENT_RE = re.compile(r"\b[A-Za-z_$][A-Za-z0-9_.$-]*\b")
 URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+MARKDOWN_LINK_RE = re.compile(r"(?<!!)\[([^\]]+)\]\(https?://[^)]+\)", re.IGNORECASE)
+MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(https?://[^)]+\)", re.IGNORECASE)
 FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 GENERIC_GROUNDING_TOKENS = {
     "behavior", "callback", "change", "code", "component", "config", "data",
@@ -68,11 +70,10 @@ def _dedupe(values: Iterable[str], *, limit: int = 80) -> list[str]:
     return out
 
 
-def _issue_text(sample: NormalizedSample) -> str:
-    text = str(sample.raw.get("problem_statement") or sample.issue_text or "")
-    # Clean15 samples may carry adapter-generated multimodal summaries inside
-    # problem_statement. URL/image tools already expose those observations with
-    # provenance, so the semantic sketch should stay grounded in the issue body.
+def semantic_issue_text(value: str) -> str:
+    """Keep human issue prose while removing URL payloads used as evidence."""
+
+    text = str(value or "")
     for marker in (
         "\nAttached Images:",
         "\nRelated URLs:",
@@ -81,9 +82,19 @@ def _issue_text(sample: NormalizedSample) -> str:
         "\n[Adapter Note]",
     ):
         text = text.split(marker, 1)[0]
-    text = re.sub(r"!\[[^\]]*\]\([^)]+\)", " ", text)
-    text = re.sub(r"(?:\[Original Issue\]\s*)+", "", text).strip()
-    return text
+    text = MARKDOWN_IMAGE_RE.sub(" ", text)
+    text = MARKDOWN_LINK_RE.sub(lambda match: match.group(1), text)
+    text = URL_RE.sub(" ", text)
+    text = re.sub(r"(?:\[Original Issue\]\s*)+", "", text)
+    return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+
+
+def _issue_text(sample: NormalizedSample) -> str:
+    text = str(sample.raw.get("problem_statement") or sample.issue_text or "")
+    # Clean15 samples may carry adapter-generated multimodal summaries inside
+    # problem_statement. URL/image tools already expose those observations with
+    # provenance, so the semantic sketch should stay grounded in the issue body.
+    return semantic_issue_text(text)
 
 
 def _task_type(text: str) -> str:
@@ -657,9 +668,44 @@ def _flow_obligations(text: str, states: list[str], concerns: list[str], effects
         add("url_builder_or_route_flow", "route/url parameters", "navigation target", "CALL+DATA", "Visible route/link bugs usually terminate in URL builder or route mapping code.")
     if any(token in haystack for token in ("mypy", "typeinfo", "deleted variable", "binder", "declaration", "typevars")):
         add("python_type_binding_flow", "symbol table / TypeInfo", "diagnostic/error behavior", "TYPE_FLOW", "Type checker bugs require binding and narrowing state tracing.")
-    if any(token in haystack for token in ("option", "config", "parser", "flag", "parameter", "rounds")):
+    if any(token in haystack for token in ("option", "config", "flag", "parameter", "rounds")):
         add("parameter_or_config_flow", "option/config parameter", "downstream behavior", "PARAMETER", "Configuration mentioned in issue must be checked through consumers.")
+    if any(token in haystack for token in ("markdown", "lexer", "tokenizer", "parser", "parse rule", "emphasis")):
+        add(
+            "parser_tokenizer_flow",
+            "input/token/rule",
+            "parsed or rendered output",
+            "CALL+DATA",
+            "Parser defects should be traced through rules, tokenization, parsing and rendering rather than URL configuration.",
+        )
     return obligations
+
+
+def _task_aware_visual_hints(hints: list[dict[str, Any]], text: str) -> list[dict[str, Any]]:
+    """Keep generic screenshot vocabulary from defining the patch target."""
+
+    lower = text.lower()
+    parser_task = any(token in lower for token in ("markdown", "lexer", "tokenizer", "parser", "emphasis"))
+    chart_task = any(token in lower for token in ("chart", "canvas", "arc", "legend", "webgl", "shader"))
+    generic_visual = {"component", "components", "layout", "plugin", "route", "state", "screen", "page"}
+    filtered: list[dict[str, Any]] = []
+    for original in hints:
+        hint = dict(original)
+        if hint.get("kind") != "visual_semantic_navigation":
+            filtered.append(hint)
+            continue
+        queries = []
+        for query in hint.get("queries", []) or []:
+            normalized = str(query or "").strip()
+            atoms = {token.lower() for token in re.split(r"[^A-Za-z0-9_]+", normalized) if token}
+            if (parser_task or chart_task) and atoms and atoms <= generic_visual:
+                continue
+            queries.append(normalized)
+        if queries:
+            hint["queries"] = _dedupe(queries, limit=12)
+            hint["ranking_policy"] = "low_weight_until_source_or_flow_corroborated"
+            filtered.append(hint)
+    return filtered
 
 
 def build_issue_sketch(sample: NormalizedSample, evidence_result: dict[str, Any]) -> IssueSketch:
@@ -671,6 +717,7 @@ def build_issue_sketch(sample: NormalizedSample, evidence_result: dict[str, Any]
     llm_sketch = _llm_issue_sketch(evidence_result)
 
     roles, hints, seed_policy = _evidence_roles(packet, tool_observations)
+    hints = _task_aware_visual_hints(hints, text)
     llm_workflow = _grounded_llm_terms(llm_sketch.get("workflow"), text=text, kind="workflow", limit=12, max_chars=140)
     llm_concerns = _grounded_llm_terms(llm_sketch.get("concern"), text=text, kind="concern", limit=12, max_chars=180)
     llm_concerns += _grounded_llm_terms(llm_sketch.get("concern_queries"), text=text, kind="concern", limit=10, max_chars=140)

@@ -45,6 +45,9 @@ def _queries_from_observation(observation: ToolObservation) -> Dict[str, List[st
             groups["url_seed"].append(str(extracted["path"]))
         if extracted.get("local_path"):
             groups["local_code"].append(str(extracted["local_path"]))
+        if extracted.get("local_path_prefix"):
+            groups["local_code"].append(str(extracted["local_path_prefix"]))
+        groups["symbol"].extend(extracted.get("local_search_terms", []) or [])
         if extracted.get("symbol_hint"):
             groups["symbol"].append(str(extracted["symbol_hint"]))
         groups["symbol"].extend(extracted.get("semantic_terms", []) or [])
@@ -75,6 +78,8 @@ def _queries_from_observation(observation: ToolObservation) -> Dict[str, List[st
         if browser_plan.get("requested_file"):
             groups["reproduction"].append(str(browser_plan["requested_file"]))
         for source_file in extracted.get("source_files", []) or []:
+            if source_file.get("eligible_as_patch_target") is False:
+                continue
             groups["reproduction"].append(str(source_file.get("path") or ""))
             groups["symbol"].append(str(source_file.get("code_preview") or "")[:500])
 

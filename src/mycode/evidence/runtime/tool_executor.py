@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import List
 from urllib.parse import urlparse
@@ -125,6 +126,17 @@ def execute_tool_request(
                 allow_network=allow_network,
                 allow_browser=allow_browser,
             )
+            external_sources = []
+            for source_file in extracted.get("source_files", []) or []:
+                if not isinstance(source_file, dict):
+                    continue
+                tagged = dict(source_file)
+                tagged["provenance"] = "external_reproduction"
+                tagged["eligible_as_patch_target"] = False
+                external_sources.append(tagged)
+            if external_sources:
+                extracted["source_files"] = external_sources
+                extracted["external_reproduction_evidence"] = external_sources
             success = extracted.get("status") == "ok" or bool(extracted.get("parsed_reproduction"))
             return ToolObservation(
                 tool=request.tool,
@@ -232,7 +244,26 @@ def execute_collection_plan(
 ) -> List[ToolObservation]:
     root = Path(cache_dir)
     observations: List[ToolObservation] = []
+    completed_requests: set[tuple[str, str, str]] = set()
     for request in plan.tool_requests:
+        request_key = (
+            request.tool,
+            request.source,
+            json.dumps(request.parameters, sort_keys=True, ensure_ascii=True, default=str),
+        )
+        if request_key in completed_requests:
+            observations.append(
+                ToolObservation(
+                    tool=request.tool,
+                    source=request.source,
+                    success=True,
+                    status="duplicate_no_gain",
+                    extracted={"reason": "identical_tool_request_already_executed"},
+                    metadata={"priority": request.priority, "role_hypothesis": request.role_hypothesis},
+                )
+            )
+            continue
+        completed_requests.add(request_key)
         request_cache = _observation_dir(root, plan, request)
         observations.append(
             execute_tool_request(

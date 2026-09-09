@@ -127,10 +127,13 @@ def test_model_cli_overrides_selected_env_file(tmp_path: Path, launcher: str) ->
     assert "profile-secret" not in completed.stdout
 
 
-def test_inherited_environment_overrides_env_file(tmp_path: Path) -> None:
+def test_selected_env_file_overrides_inherited_model_environment(tmp_path: Path) -> None:
     env_file = tmp_path / ".env.profile"
     env_file.write_text(
-        "MODEL_NAME=file-label\nMODEL_API_NAME=file-api-model\n",
+        "BASE_URL=https://profile.example/v1\n"
+        "API_KEY=profile-secret\n"
+        "MODEL_NAME=file-label\n"
+        "MODEL_API_NAME=file-api-model\n",
         encoding="utf-8",
     )
     env = os.environ.copy()
@@ -156,8 +159,87 @@ def test_inherited_environment_overrides_env_file(tmp_path: Path) -> None:
         text=True,
     )
 
-    assert "Model label: environment-label" in completed.stdout
-    assert "Model API name: environment-api-model" in completed.stdout
+    assert "Model label: file-label" in completed.stdout
+    assert "Model API name: file-api-model" in completed.stdout
+
+
+@pytest.mark.parametrize(
+    "launcher",
+    [
+        "newtest/run_swe_clean15_agent_full.sh",
+        "newtest/run_omni_clean15_agent_full.sh",
+    ],
+)
+def test_llm_launcher_requires_explicit_env_file(launcher: str) -> None:
+    env = os.environ.copy()
+    for name in (
+        "BASE_URL",
+        "API_KEY",
+        "MODEL_NAME",
+        "MODEL_API_NAME",
+        "ENV_FILE",
+        "LOAD_ENV_FILE",
+    ):
+        env.pop(name, None)
+
+    completed = subprocess.run(
+        ["bash", str(ROOT / launcher), "--print-model-config"],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 2
+    assert "explicit model profile is required" in completed.stderr
+    assert "Model label: offline" not in completed.stdout
+
+
+def test_llm_launcher_rejects_missing_or_incomplete_env_file(tmp_path: Path) -> None:
+    missing = tmp_path / ".env.missing"
+    incomplete = tmp_path / ".env.incomplete"
+    incomplete.write_text(
+        "BASE_URL=https://profile.example/v1\nMODEL_API_NAME=model-without-key\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    for name in ("BASE_URL", "API_KEY", "MODEL_NAME", "MODEL_API_NAME", "ENV_FILE"):
+        env.pop(name, None)
+
+    missing_result = subprocess.run(
+        [
+            "bash",
+            str(ROOT / "newtest/run_swe_clean15_agent_full.sh"),
+            "--env-file",
+            str(missing),
+            "--print-model-config",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    incomplete_result = subprocess.run(
+        [
+            "bash",
+            str(ROOT / "newtest/run_swe_clean15_agent_full.sh"),
+            "--env-file",
+            str(incomplete),
+            "--print-model-config",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert missing_result.returncode == 2
+    assert "missing, unreadable, or empty" in missing_result.stderr
+    assert incomplete_result.returncode == 2
+    assert "Missing required keys: API_KEY" in incomplete_result.stderr
 
 
 def test_chat_completion_supports_mimo_thinking_and_token_controls(

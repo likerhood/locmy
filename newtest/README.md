@@ -35,20 +35,24 @@ bash newtest/run_omni_clean15_full.sh
 
 ## 打开真实 LLM evidence agent / controller
 
-如果 `.env.local` 已经配置 `BASE_URL`、`API_KEY`、`MODEL_NAME`、可选 `MODEL_API_NAME`：
+真实 LLM 启动器必须通过 `--env-file` 显式选择包含 `BASE_URL`、`API_KEY`
+和 `MODEL_API_NAME` 的配置文件。没有选择、文件不存在或必需字段为空时，启动器会在
+处理第一个样本前退出，不再自动回退到 `offline`：
 
 ```bash
 USE_LLM=1 \
 USE_LLM_PLANNING=1 \
 USE_LLM_CONTROLLER=1 \
 MAX_SAMPLES=1 \
-bash newtest/run_swe_clean15_full.sh
+bash newtest/run_swe_clean15_agent_full.sh \
+  --env-file .env.qwen.local
 ```
 
 也可以直接在命令行选择模型。`--model` 同时设置结果目录中的模型标签和发送给 API 的模型 ID：
 
 ```bash
 bash newtest/run_swe_clean15_agent_full.sh \
+  --env-file .env.qwen.local \
   --model xopqwen35397b \
   --print-model-config
 ```
@@ -57,11 +61,13 @@ bash newtest/run_swe_clean15_agent_full.sh \
 
 ```bash
 bash newtest/run_swe_clean15_agent_full.sh \
+  --env-file .env.qwen.local \
   --model-label Qwen3.5-397B-A17B \
   --model-api-name xopqwen35397b
 ```
 
-可以维护多个模型配置文件，并用 `--env-file` 选择。显式命令行参数和已有环境变量优先于配置文件：
+可以维护多个模型配置文件，并用 `--env-file` 选择。所选文件会替换终端中遗留的
+provider/model 变量，显式 `--model` 参数拥有最终优先级：
 
 ```bash
 bash newtest/run_swe_clean15_agent_full.sh \
@@ -98,7 +104,7 @@ VLM_MODEL_API_NAME=vision-model-id
 ```bash
 cd /home/like/locCode/alltry/mycode
 
-bash newtest/run_swe_clean15_agent_full.sh
+bash newtest/run_swe_clean15_agent_full.sh --env-file .env.qwen.local
 ```
 
 建议先跑 1 条确认 API、trace、token 统计都正常：
@@ -107,7 +113,8 @@ bash newtest/run_swe_clean15_agent_full.sh
 cd /home/like/locCode/alltry/mycode
 
 MAX_SAMPLES=1 RUN_ID=agent_smoke FORCE_RERUN=1 \
-bash newtest/run_swe_clean15_agent_full.sh
+bash newtest/run_swe_clean15_agent_full.sh \
+  --env-file .env.qwen.local
 ```
 
 如果要真正打开网页/下载图片/VLM 图片理解：
@@ -116,7 +123,8 @@ bash newtest/run_swe_clean15_agent_full.sh
 cd /home/like/locCode/alltry/mycode
 
 FULL_MM=1 RUN_ID=agent_full_mm \
-bash newtest/run_swe_clean15_agent_full.sh
+bash newtest/run_swe_clean15_agent_full.sh \
+  --env-file .env.qwen.local
 ```
 
 默认输出目录形如：
@@ -140,7 +148,8 @@ bash newtest/run_swe_clean15_agent_full.sh
 cd /home/like/locCode/alltry/mycode
 
 DEEP_AGENT=1 INSTANCE_ID=Automattic__wp-calypso-21409 RUN_ID=deep_21409 \
-bash newtest/run_swe_clean15_agent_full.sh
+bash newtest/run_swe_clean15_agent_full.sh \
+  --env-file .env.qwen.local
 ```
 
 ## 打开深度动态 Agent

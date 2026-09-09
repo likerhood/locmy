@@ -11,10 +11,8 @@ if [[ "${MODEL_HELP_ONLY:-0}" == "1" ]]; then
   exit 0
 fi
 
-ENV_FILE="${ENV_FILE:-$ROOT/.env.local}"
-if [[ "${LOAD_ENV_FILE:-1}" == "1" && -f "$ENV_FILE" ]]; then
-  load_env_defaults "$ENV_FILE"
-fi
+ENV_FILE="${ENV_FILE:-}"
+load_required_model_environment "$0"
 
 MODEL_LABEL="${MODEL_NAME:-${MODEL_API_NAME:-llm-agent}}"
 MODEL_LABEL="$(printf '%s' "$MODEL_LABEL" | sed 's/[^A-Za-z0-9_.-]/_/g')"
@@ -155,6 +153,7 @@ echo "Run SWE Clean15 with real LLM dynamic agent"
 echo "Root: $ROOT"
 echo "Samples: $SAMPLES"
 echo "Output: $OUTPUT_DIR"
+echo "Model profile: $ENV_FILE"
 echo "Model label: $MODEL_LABEL"
 echo "Model API name: ${MODEL_API_NAME:-${MODEL_NAME:-<unset>}}"
 echo "Stage models: planning=${PLANNING_MODEL_API_NAME:-<global>} evidence=${EVIDENCE_MODEL_API_NAME:-<global>} controller=${CONTROLLER_MODEL_API_NAME:-<global>} vlm=${VLM_MODEL_API_NAME:-<global>}"

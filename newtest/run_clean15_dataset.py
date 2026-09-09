@@ -1025,6 +1025,26 @@ def main() -> None:
     if not samples_path.exists():
         raise SystemExit(f"Samples file does not exist: {samples_path}")
 
+    config = llm_config_from_env()
+    model_runtime_enabled = any(
+        (args.use_llm, args.use_llm_planning, args.use_llm_controller, args.use_vlm)
+    )
+    if model_runtime_enabled:
+        missing = [
+            name
+            for name, value in (
+                ("BASE_URL", config.get("base_url")),
+                ("API_KEY", config.get("api_key")),
+                ("MODEL_API_NAME", config.get("model_api_name")),
+            )
+            if not str(value or "").strip()
+        ]
+        if missing:
+            raise SystemExit(
+                "Model-backed features are enabled but model configuration is incomplete. "
+                f"Missing: {', '.join(missing)}. Launch with --env-file PATH."
+            )
+
     output_dir.mkdir(parents=True, exist_ok=True)
     results_jsonl = output_dir / "localization_results.jsonl"
     failures_jsonl = output_dir / "failures.jsonl"
@@ -1068,7 +1088,6 @@ def main() -> None:
 
     selected = _selected_samples(samples_path, args.dataset, args.instance_id, args.start_index, args.max_samples)
     completed = _read_completed(results_jsonl) if args.resume and not args.force else set()
-    config = llm_config_from_env()
     total_rows = count_samples(samples_path)
 
     print(f"mycode Clean15 batch runner", flush=True)
@@ -1084,6 +1103,7 @@ def main() -> None:
     print(f"Phase Events JSONL: {phase_events_jsonl}", flush=True)
     print(f"Phase State JSON: {phase_state_json}", flush=True)
     print(f"Cache: {cache_dir}", flush=True)
+    print(f"Model profile: {os.environ.get('MYCODE_ACTIVE_ENV_FILE') or '<not-selected>'}", flush=True)
     print(f"Model label: {config.get('model_name') or config.get('model_api_name') or 'offline'}", flush=True)
     print(f"LLM/API model: {config.get('model_api_name') or '<none>'}", flush=True)
     print(

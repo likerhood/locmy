@@ -1351,6 +1351,20 @@ def main() -> None:
         "architecture_path_limit": int(os.environ.get("MYCODE_ROUND_ARCHITECTURE_PATH_LIMIT", "16") or 16),
         "architecture_corroboration": os.environ.get("MYCODE_ARCHITECTURE_CORROBORATION", "1") == "1",
         "best_round_checkpoint": os.environ.get("MYCODE_BEST_ROUND_CHECKPOINT", "1") == "1",
+        "cross_round_protected_prefix": int(
+            os.environ.get("MYCODE_CROSS_ROUND_PROTECTED_PREFIX", "6") or 6
+        ),
+        "cross_round_max_replacements": int(
+            os.environ.get("MYCODE_CROSS_ROUND_MAX_REPLACEMENTS", "4") or 4
+        ),
+        "head_replacement_margin": float(
+            os.environ.get("MYCODE_HEAD_REPLACEMENT_MARGIN", "3.0") or 3.0
+        ),
+        "plateau_review_override_round": int(
+            os.environ.get("MYCODE_PLATEAU_REVIEW_OVERRIDE_ROUND", "12") or 12
+        ),
+        "browser_required": os.environ.get("MYCODE_BROWSER_REQUIRED", "0") == "1",
+        "require_source_checkout": os.environ.get("MYCODE_REQUIRE_SOURCE_CHECKOUT", "0") == "1",
         "trace_jsonl": str(trace_jsonl),
         "token_jsonl": str(token_jsonl),
         "llm_events_jsonl": str(llm_events_jsonl),

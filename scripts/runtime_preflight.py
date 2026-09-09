@@ -20,6 +20,26 @@ def _version(package: str) -> str | None:
         return None
 
 
+def _resolve_rg() -> str | None:
+    explicit = os.environ.get("MYCODE_RG_BIN", "").strip()
+    candidates = [Path(explicit).expanduser()] if explicit else []
+    discovered = shutil.which("rg")
+    if discovered:
+        candidates.append(Path(discovered))
+    candidates.extend((Path("/usr/bin/rg"), Path("/usr/local/bin/rg")))
+    home = Path.home()
+    for extension_root in (home / ".vscode-server/extensions", home / ".vscode/extensions"):
+        if extension_root.is_dir():
+            candidates.extend(sorted(extension_root.glob("*/bin/*/rg"), reverse=True))
+    for candidate in candidates:
+        try:
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate.resolve())
+        except OSError:
+            continue
+    return None
+
+
 def _browser_probe() -> dict[str, Any]:
     result: dict[str, Any] = {
         "python_package": importlib.util.find_spec("playwright") is not None,
@@ -96,9 +116,14 @@ def collect_runtime_capabilities() -> dict[str, Any]:
         "MYCODE_DEEP_FLOW_AUTO",
         "MYCODE_FAST_SEED_PLANNER",
         "MYCODE_FAST_SEED_LLM",
+        "MYCODE_FAST_SEED_SHORTLIST",
         "MYCODE_VLM_IMAGE_TRANSPORT",
         "MYCODE_AUTO_FETCH_REPOS",
+        "MYCODE_REQUIRE_SOURCE_CHECKOUT",
         "MYCODE_BROWSER_REQUIRED",
+        "MYCODE_CROSS_ROUND_PROTECTED_PREFIX",
+        "MYCODE_HEAD_REPLACEMENT_MARGIN",
+        "MYCODE_PLATEAU_REVIEW_OVERRIDE_ROUND",
     )
     return {
         "status": "ok",
@@ -109,7 +134,7 @@ def collect_runtime_capabilities() -> dict[str, Any]:
             "playwright": _version("playwright"),
             "pytest": _version("pytest"),
         },
-        "commands": {"git": shutil.which("git"), "rg": shutil.which("rg")},
+        "commands": {"git": shutil.which("git"), "rg": _resolve_rg()},
         "browser": _browser_probe(),
         "git_commit": git_commit,
         "git_dirty": git_dirty,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,13 +41,20 @@ def prepare_repository_assets(
     )
     if structure_path is not None:
         repo_root = find_repo_root(sample.repo, sample.dataset, base_commit=base_commit)
+        source = "existing_structure"
+        require_source_checkout = os.environ.get(
+            "MYCODE_REQUIRE_SOURCE_CHECKOUT", "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        if repo_root is None and auto_fetch and require_source_checkout:
+            repo_root = ensure_repo_checkout(sample.repo, base_commit)
+            source = "existing_structure_with_standalone_checkout"
         return RepositoryAssets(
-            # Keep the canonical structure snapshot for indexing, while exposing
-            # an exact existing checkout to evidence tools such as GitHub URL
-            # resolution. Do not clone solely because a reusable structure exists.
+            # Reuse the canonical structure snapshot for indexing. Full evidence
+            # runs may additionally require an exact checkout for source quotes,
+            # GitHub blob routing, and call/dataflow verification.
             repo_root=repo_root or (NO_REPO_ROOT if structure_only else None),
             structure_path=structure_path,
-            source="existing_structure",
+            source=source,
             base_commit=base_commit,
         )
 

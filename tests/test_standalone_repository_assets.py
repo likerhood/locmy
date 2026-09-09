@@ -141,3 +141,56 @@ def test_existing_external_structure_is_preferred_without_fetch(
     assert assets.source == "existing_structure"
     assert assets.structure_path == structure
     assert not (tmp_path / "cache" / "git").exists()
+
+
+def test_existing_structure_can_require_exact_source_checkout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    instance_id = "external__fixture-2"
+    structure = (
+        tmp_path
+        / "LocAgent"
+        / "newtest"
+        / "swebench_multimodal-full-dev"
+        / "repo_structures"
+        / f"{instance_id}.json"
+    )
+    structure.parent.mkdir(parents=True)
+    structure.write_text(
+        json.dumps(
+            {
+                "base_commit": "abc123",
+                "structure": {"src/app.py": {"text": "def run(): pass"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    checkout = tmp_path / "exact-checkout"
+    checkout.mkdir()
+    calls: list[tuple[str, str]] = []
+
+    def fake_checkout(repo: str, base_commit: str) -> Path:
+        calls.append((repo, base_commit))
+        return checkout
+
+    monkeypatch.setenv("LOC_CODE_ROOT", str(tmp_path))
+    monkeypatch.setenv("MYCODE_REQUIRE_SOURCE_CHECKOUT", "1")
+    monkeypatch.setattr(
+        "mycode.repo_index.repository_assets.ensure_repo_checkout",
+        fake_checkout,
+    )
+    sample = NormalizedSample(
+        instance_id=instance_id,
+        repo="external/fixture",
+        dataset="swebench_multimodal-full-dev-clean15",
+        issue_text="run should use the exact implementation",
+        raw={"base_commit": "abc123"},
+    )
+
+    assets = prepare_repository_assets(sample, structure_only=True, auto_fetch=True)
+
+    assert calls == [("external/fixture", "abc123")]
+    assert assets.structure_path == structure
+    assert assets.repo_root == checkout
+    assert assets.source == "existing_structure_with_standalone_checkout"

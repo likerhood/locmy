@@ -2680,11 +2680,41 @@ def _round_checkpoint_quality(search_round: DynamicSearchRound) -> dict[str, Any
         for item in top_six
         if bool(((item.belief or {}).get("llm_candidate_review") or {}).get("grounded"))
     )
-    verified_source_top6 = sum(
-        1
-        for item in top_six
-        if bool((item.belief or {}).get("read_verified"))
-        and _path_role(item.path) not in _CLOSURE_BLOCKED_ROLES
+    def checkpoint_facts(item: RankedLocation) -> dict[str, bool]:
+        item_belief = item.belief or {}
+        item_review = item_belief.get("llm_candidate_review") or {}
+        item_components = item.score_components or {}
+        item_read = bool(item_belief.get("read_verified"))
+        item_grounded = bool(item_review.get("grounded")) and item_read
+        item_quote = bool(item_review.get("quote_supported")) and item_read
+        item_entity = bool(
+            item_review.get("supported_entities") or item_review.get("entity_supported")
+        ) and item_read
+        item_program = bool(item_review.get("direct_flow_supported")) or any(
+            float(item_components.get(name, 0.0) or 0.0) > 0
+            for name in ("call_score", "flow_score", "flow_verifier")
+        )
+        item_mechanism = bool(item_review.get("mechanism_verified")) and item_grounded
+        item_equivalent = bool(item_read and item_quote and item_entity and item_program)
+        patchable = _path_role(item.path) not in _CLOSURE_BLOCKED_ROLES
+        return {
+            "read": item_read,
+            "grounded": item_grounded,
+            "program": item_program,
+            "mechanism": item_mechanism,
+            "equivalent": item_equivalent,
+            "source_supported": bool(
+                patchable and item_read and (item_grounded or item_quote or item_entity or item_program)
+            ),
+            "responsibility": bool(patchable and (item_mechanism or item_equivalent)),
+        }
+
+    top_six_facts = [checkpoint_facts(item) for item in top_six]
+    verified_source_top6 = sum(fact["source_supported"] for fact in top_six_facts)
+    responsibility_top6 = sum(fact["responsibility"] for fact in top_six_facts)
+    program_grounded_top6 = sum(
+        fact["program"] and (fact["grounded"] or fact["equivalent"])
+        for fact in top_six_facts
     )
     blocked_role_top6 = sum(
         1 for item in top_six if _path_role(item.path) in _CLOSURE_BLOCKED_ROLES
@@ -2714,10 +2744,17 @@ def _round_checkpoint_quality(search_round: DynamicSearchRound) -> dict[str, Any
         - blocked_role_top6 * 0.75
         - (1.5 if architecture_only else 0.0)
     )
-    flow_coverage = min(1.0, len(getattr(search_round, "flow_traces", []) or []) / 3.0)
+    flow_coverage = min(
+        1.0,
+        sum(fact["program"] for fact in top_six_facts) / max(1, min(3, len(top_six_facts))),
+    )
+    top_facts = top_six_facts[0]
     selection_key = [
         int(mechanism_verified),
+        int(top_facts["equivalent"]),
         verified_top6,
+        responsibility_top6,
+        program_grounded_top6,
         verified_source_top6,
         grounded_top6,
         round(flow_coverage, 4),
@@ -2737,6 +2774,8 @@ def _round_checkpoint_quality(search_round: DynamicSearchRound) -> dict[str, Any
         "direct_axes": sorted(direct_axes),
         "root_mechanism_candidate_count": verified_top6,
         "verified_source_count_in_top6": verified_source_top6,
+        "responsibility_candidate_count_in_top6": responsibility_top6,
+        "program_grounded_candidate_count_in_top6": program_grounded_top6,
         "grounded_candidate_count_in_top6": grounded_top6,
         "required_flow_coverage": round(flow_coverage, 4),
         "negative_blocked_role_count_in_top6": blocked_role_top6,
@@ -3474,18 +3513,32 @@ def _stop_decision(
     if round_no >= max_rounds:
         return {"stop": True, "reason": "max_rounds_reached", "top_paths": current_top, "confidence": confidence}
     plateau_limit = _env_int("MYCODE_EVIDENCE_PLATEAU_ROUNDS", 2, minimum=1)
+    review_override_round = _env_int(
+        "MYCODE_PLATEAU_REVIEW_OVERRIDE_ROUND",
+        max(8, max_rounds - 2),
+        minimum=1,
+    )
+    stale_review_override = bool(
+        review_requests_more
+        and not critical_missing
+        and round_no >= review_override_round
+        and bool(round_progress.get("stable_top3"))
+        and int(round_progress.get("strong_evidence_gain_count") or 0) == 0
+        and int(round_progress.get("new_flow_count") or 0) == 0
+    )
     if (
         _env_bool("MYCODE_EARLY_STOP_EVIDENCE_PLATEAU", True)
         and int(round_progress.get("plateau_streak") or 0) >= plateau_limit
-        and not review_requests_more
+        and (not review_requests_more or stale_review_override)
         and not critical_missing
     ):
         return {
             "stop": True,
-            "reason": "evidence_plateau",
+            "reason": "evidence_plateau_after_repeated_review" if stale_review_override else "evidence_plateau",
             "top_paths": current_top,
             "confidence": confidence,
             "round_progress": round_progress,
+            "review_override_round": review_override_round,
             "missing_evidence": critical_missing[:8] or list(candidate_review.get("missing_evidence", []) or [])[:8],
         }
     if review_requests_more:
@@ -3765,13 +3818,17 @@ def _cross_round_candidate_frontier(
         read_verified = path in context_paths or bool(belief.get("read_verified"))
         grounded = bool(decision.get("grounded", decision.get("quote_supported", False))) and read_verified
         mechanism = bool(decision.get("mechanism_verified", False)) and grounded
-        direct = any(
+        retrieval_direct = any(
             float(components.get(name, 0.0) or 0.0) > 0
             for name in (
-                "symbol_score", "path_score", "domain_path_probe", "call_score",
-                "flow_score", "flow_verifier", "entity_search", "concern_search",
+                "symbol_score", "path_score", "domain_path_probe", "entity_search",
+                "concern_search",
             )
         )
+        program_direct = any(
+            float(components.get(name, 0.0) or 0.0) > 0
+            for name in ("call_score", "flow_score", "flow_verifier")
+        ) or bool(decision.get("direct_flow_supported"))
         path_tokens = {token for token in tokenize(path.lower()) if len(token) >= 4}
         overlap = path_tokens & issue_tokens
         exact_path = bool(path and path.lower() in issue_lower)
@@ -3783,8 +3840,10 @@ def _cross_round_candidate_frontier(
             quality += 10.0 / selected_rank
         if read_verified:
             quality += 2.0
-        if direct:
+        if retrieval_direct:
             quality += 1.5
+        if program_direct:
+            quality += 2.5
         if grounded:
             quality += 3.0
         if mechanism:
@@ -3793,14 +3852,22 @@ def _cross_round_candidate_frontier(
             quality += 8.0
         elif overlap:
             quality += min(3.0, len(overlap) * 1.2)
+        equivalent_mechanism = bool(
+            read_verified
+            and grounded
+            and bool(decision.get("quote_supported"))
+            and bool(decision.get("supported_entities") or decision.get("entity_supported"))
+            and program_direct
+        )
         strong = bool(
             mechanism
+            or equivalent_mechanism
             or (
                 grounded
                 and str(decision.get("role") or "") in {"patch_target", "supporting_target"}
-                and float(decision.get("confidence") or 0.0) >= 0.62
+                and float(decision.get("confidence") or 0.0) >= 0.72
+                and program_direct
             )
-            or (read_verified and direct and (exact_path or overlap or len(history) >= 2))
         )
         return quality, {
             "quality": round(quality, 3),
@@ -3808,7 +3875,9 @@ def _cross_round_candidate_frontier(
             "read_verified": read_verified,
             "grounded": grounded,
             "mechanism_verified": mechanism,
-            "direct_evidence": direct,
+            "retrieval_evidence": retrieval_direct,
+            "program_evidence": program_direct,
+            "equivalent_mechanism": equivalent_mechanism,
             "issue_path_overlap": sorted(overlap)[:6],
             "strong": strong,
         }
@@ -3824,13 +3893,23 @@ def _cross_round_candidate_frontier(
     replacements: list[dict[str, Any]] = []
     replacement_additions: set[str] = set()
     replacement_margin = _env_float("MYCODE_CROSS_ROUND_REPLACEMENT_MARGIN", 0.75, minimum=0.0)
+    protected_prefix = min(
+        len(selected_paths),
+        _env_int("MYCODE_CROSS_ROUND_PROTECTED_PREFIX", 6, minimum=0),
+    )
     for challenger in challengers:
         if len(replacements) >= max_replacements:
             break
         replaceable = [
             path for path in selected_paths
             if path not in locked_paths and path not in replacement_additions
+            and selected_paths.index(path) >= protected_prefix
         ]
+        if not replaceable and len(selected_paths) <= protected_prefix:
+            replaceable = [
+                path for path in selected_paths
+                if path not in locked_paths and path not in replacement_additions
+            ]
         if not replaceable:
             break
         incumbent = min(
@@ -3870,6 +3949,7 @@ def _cross_round_candidate_frontier(
         "lock_limit": lock_limit,
         "adaptive_locks": adaptive_locks,
         "max_replacements": max_replacements,
+        "protected_prefix": protected_prefix,
         "candidate_count": len(representatives),
         "strong_challenger_count": len(challengers),
         "replacements": replacements,
@@ -4039,6 +4119,16 @@ def _precision_rerank_locations(
         if implementation_evidence:
             quality += 2.5
             evidence_reasons.append("read_direct_implementation_evidence")
+        direct_program_evidence = bool(decision.get("direct_flow_supported")) or any(
+            float(components.get(name, 0.0) or 0.0) > 0
+            for name in ("call_score", "flow_score", "flow_verifier")
+        )
+        equivalent_mechanism = bool(
+            read_verified
+            and quote_supported
+            and entity_supported
+            and direct_program_evidence
+        )
         if architecture_only:
             quality -= 4.0
             evidence_reasons.append("architecture_only_penalty")
@@ -4073,17 +4163,7 @@ def _precision_rerank_locations(
             evidence_reasons.append("unverified_declaration_penalty")
 
         strong_top_challenger = bool(
-            path_lower in issue_lower
-            or (
-                review_role == "patch_target"
-                and grounded
-                and (mechanism or quote_supported or entity_supported)
-            )
-            or (
-                implementation_evidence
-                and review_role not in {"navigation_only", "reproduction_only", "test_or_docs", "unlikely"}
-                and not counterevidence
-            )
+            not counterevidence and (mechanism or equivalent_mechanism)
         )
         stable_top = bool(
             base_rank == 1
@@ -4103,11 +4183,14 @@ def _precision_rerank_locations(
             role_allowed_at_head
             and read_verified
             and not counterevidence
-            and (
-                mechanism
-                or (quote_supported and entity_supported and direct_component)
-                or implementation_evidence
-            )
+            and (mechanism or equivalent_mechanism)
+        )
+        blocked_head_fallback_eligible = bool(
+            role_allowed_at_head
+            and read_verified
+            and not counterevidence
+            and direct_program_evidence
+            and implementation_evidence
         )
 
         item.score_components["precision_evidence_quality"] = round(quality, 3)
@@ -4118,11 +4201,14 @@ def _precision_rerank_locations(
             "read_verified": read_verified,
             "grounded": grounded,
             "mechanism_verified": mechanism,
+            "equivalent_mechanism": equivalent_mechanism,
+            "direct_program_evidence": direct_program_evidence,
             "counterevidence_count": len(counterevidence),
             "counterevidence_grounded": counterevidence_grounded,
             "strong_top_challenger": strong_top_challenger,
             "stable_top": stable_top,
             "head_eligible": head_eligible,
+            "blocked_head_fallback_eligible": blocked_head_fallback_eligible,
             "role_allowed_at_head": role_allowed_at_head,
             "evidence": evidence_reasons,
         }
@@ -4134,12 +4220,30 @@ def _precision_rerank_locations(
     margin = _env_float("MYCODE_HEAD_REPLACEMENT_MARGIN", 3.0, minimum=0.0)
     incumbent = rows[0]
     eligible = [row for row in rows[:head_limit] if row[3].get("head_eligible")]
+    incumbent_role = _path_role(incumbent[2].path)
+    incumbent_blocked = bool(
+        incumbent_role in _CLOSURE_BLOCKED_ROLES
+        or (
+            incumbent_role == "declaration_or_schema"
+            and not any(
+                phrase in issue_lower
+                for phrase in ("declaration", "type definition", "typing", ".d.ts", ".pyi", "schema")
+            )
+        )
+    )
+    fallback_eligible = [
+        row
+        for row in rows[:head_limit]
+        if row[3].get("blocked_head_fallback_eligible")
+    ]
     chosen = incumbent
     if eligible:
         challenger = max(eligible, key=lambda row: (row[0], -row[1]))
         incumbent_eligible = bool(incumbent[3].get("head_eligible"))
         if not incumbent_eligible or challenger[0] >= incumbent[0] + margin:
             chosen = challenger
+    elif incumbent_blocked and fallback_eligible:
+        chosen = max(fallback_eligible, key=lambda row: (row[0], -row[1]))
     ordered_rows = [chosen] + [row for row in rows if row[2].path != chosen[2].path]
     reranked = [row[2] for row in ordered_rows]
     changes = [
@@ -4162,6 +4266,25 @@ def _precision_rerank_locations(
         "head_replaced": chosen[1] != 1,
         "selected_head": chosen[2].path,
         "selected_head_quality": round(chosen[0], 3),
+        "selected_head_evidence": {
+            key: chosen[3].get(key)
+            for key in (
+                "read_verified", "grounded", "mechanism_verified",
+                "equivalent_mechanism", "direct_program_evidence", "head_eligible",
+                "blocked_head_fallback_eligible",
+            )
+        },
+        "incumbent_blocked": incumbent_blocked,
+        "eligible_heads": [
+            {
+                "path": row[2].path,
+                "rank": row[1],
+                "quality": round(row[0], 3),
+                "mechanism_verified": bool(row[3].get("mechanism_verified")),
+                "equivalent_mechanism": bool(row[3].get("equivalent_mechanism")),
+            }
+            for row in eligible
+        ],
         "top_before": [item.path for item in ranked[:5]],
         "top_after": [item.path for item in reranked[:5]],
         "changes": changes[:12],

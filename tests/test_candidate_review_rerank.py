@@ -527,6 +527,31 @@ def test_evidence_plateau_does_not_hide_required_review_evidence() -> None:
     assert decision["reason"] == "candidate_review_requests_more_evidence"
 
 
+def test_evidence_plateau_stops_repeated_noncritical_review_after_late_round(monkeypatch) -> None:
+    monkeypatch.setenv("MYCODE_PLATEAU_REVIEW_OVERRIDE_ROUND", "10")
+    ranked = [RankedLocation(path="src/io/files.js", score=100.0)]
+    decision = _stop_decision(
+        round_no=10,
+        max_rounds=14,
+        ranked=ranked,
+        previous_top_paths=["src/io/files.js"],
+        next_queries=["same optional query"],
+        candidate_review={
+            "status": "ok",
+            "continue_search": True,
+            "critical_missing_evidence": [],
+        },
+        round_progress={
+            "plateau_streak": 2,
+            "stable_top3": True,
+            "strong_evidence_gain_count": 0,
+            "new_flow_count": 0,
+        },
+    )
+    assert decision["stop"] is True
+    assert decision["reason"] == "evidence_plateau_after_repeated_review"
+
+
 def test_round_progress_collapses_term_only_flow_churn_into_one_family() -> None:
     previous = RankedLocation(
         path="src/target.js",
@@ -1302,6 +1327,92 @@ def test_precision_rerank_promotes_grounded_mechanism_over_generic_rank_one() ->
     assert [item.path for item in reranked[1:]] == [item.path for item in ranked if item.path != "src/ownership.js"]
 
 
+def test_precision_rerank_does_not_promote_unverified_implementation_sibling() -> None:
+    ranked = [
+        RankedLocation(
+            path="client/state/posts/actions.js",
+            score=100.0,
+            score_components={"call_score": 3.0},
+            belief={"read_verified": True},
+        ),
+        RankedLocation(
+            path="client/state/ui/editor/actions.js",
+            score=99.0,
+            score_components={"path_score": 20.0, "domain_path_probe": 8.0},
+            belief={"read_verified": True},
+        ),
+    ]
+    reranked, diagnostics = _precision_rerank_locations(
+        ranked=ranked,
+        round_rankings=[ranked, ranked],
+        issue_text="Saving a post must update application state through its action.",
+        review={
+            "candidates": [
+                {
+                    "path": "client/state/ui/editor/actions.js",
+                    "role": "patch_target",
+                    "confidence": 0.95,
+                    "grounded": False,
+                    "quote_supported": False,
+                    "entity_supported": False,
+                    "mechanism_verified": False,
+                }
+            ]
+        },
+        code_contexts=[
+            {
+                "path": "client/state/ui/editor/actions.js",
+                "snippets": [{"text": "export const updateEditor = () => ({ type: UPDATE_EDITOR });"}],
+            }
+        ],
+        top_k=2,
+    )
+
+    assert [item.path for item in reranked] == [item.path for item in ranked]
+    assert diagnostics["head_replaced"] is False
+    assert diagnostics["eligible_heads"] == []
+
+
+def test_precision_rerank_accepts_quote_entity_and_direct_flow_as_equivalent_mechanism() -> None:
+    ranked = [
+        RankedLocation(path="src/generic.py", score=100.0),
+        RankedLocation(
+            path="src/handler.py",
+            score=90.0,
+            score_components={"call_score": 4.0},
+            belief={"read_verified": True},
+        ),
+    ]
+    reranked, diagnostics = _precision_rerank_locations(
+        ranked=ranked,
+        round_rankings=[ranked, ranked],
+        issue_text="The handler fails to dispatch the update.",
+        review={
+            "candidates": [
+                {
+                    "path": "src/handler.py",
+                    "role": "patch_target",
+                    "confidence": 0.9,
+                    "grounded": True,
+                    "quote_supported": True,
+                    "entity_supported": True,
+                    "supported_entities": ["dispatch_update"],
+                    "direct_flow_supported": True,
+                    "mechanism_verified": False,
+                }
+            ]
+        },
+        code_contexts=[
+            {"path": "src/handler.py", "snippets": [{"text": "dispatch_update(value)"}]}
+        ],
+        top_k=2,
+    )
+
+    assert reranked[0].path == "src/handler.py"
+    assert diagnostics["head_replaced"] is True
+    assert diagnostics["selected_head_evidence"]["equivalent_mechanism"] is True
+
+
 def test_source_first_classifies_common_compiled_bundle_suffixes() -> None:
     assert _path_role("lib/library.umd.js") == "generated_or_lockfile"
     assert _path_role("lib/marked.esm.js") == "generated_or_lockfile"
@@ -1346,6 +1457,48 @@ def test_cross_round_frontier_preserves_head_and_recovers_read_tail_candidate() 
     assert [item.path for item in fused[:5]] == [item.path for item in selected[:5]]
     assert fused[5].path == "src/ownership.py"
     assert diagnostics["replacements"][0]["removed"] == "src/selected_6.py"
+
+
+def test_cross_round_frontier_keeps_top_six_and_uses_tail_for_verified_recovery(monkeypatch) -> None:
+    monkeypatch.setenv("MYCODE_CROSS_ROUND_PROTECTED_PREFIX", "6")
+    monkeypatch.setenv("MYCODE_CROSS_ROUND_REPLACEMENT_MARGIN", "0")
+    selected = [
+        RankedLocation(path=f"src/selected_{index}.py", score=100.0 - index)
+        for index in range(1, 16)
+    ]
+    recovered = RankedLocation(
+        path="src/recovered.py",
+        score=90.0,
+        score_components={"flow_score": 5.0},
+        belief={"read_verified": True},
+    )
+    fused, diagnostics = _cross_round_candidate_frontier(
+        selected=selected,
+        round_rankings=[selected, [recovered, *selected[:14]]],
+        issue_text="Fix the recovered state transition.",
+        review={
+            "candidates": [
+                {
+                    "path": "src/recovered.py",
+                    "role": "patch_target",
+                    "confidence": 0.95,
+                    "grounded": True,
+                    "quote_supported": True,
+                    "entity_supported": True,
+                    "supported_entities": ["transition"],
+                    "direct_flow_supported": True,
+                    "mechanism_verified": True,
+                }
+            ]
+        },
+        code_contexts=[
+            {"path": "src/recovered.py", "snippets": [{"text": "def transition(): pass"}]}
+        ],
+        top_k=15,
+    )
+    assert [item.path for item in fused[:6]] == [item.path for item in selected[:6]]
+    assert "src/recovered.py" in [item.path for item in fused[6:]]
+    assert diagnostics["protected_prefix"] == 6
 
 
 def test_cross_round_frontier_locks_only_verified_candidates(monkeypatch) -> None:

@@ -1,0 +1,11 @@
+{
+  "os": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+  "python": "3.12.3",
+  "cpu_visible": "4 logical CPUs; Intel Core Ultra 5 125H",
+  "memory_visible": "17 GiB",
+  "swap": "8 GiB",
+  "workspace_disk_free": "646 GiB at audit time",
+  "docker": "WSL integration unavailable",
+  "gpu_required_for_api_repair": false,
+  "recommended_initial_workers": 1
+}

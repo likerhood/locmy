@@ -1,0 +1,11 @@
+{
+  "localization_model_label": "Qwen3.5-397B-A17B",
+  "top_k": 5,
+  "max_output_tokens": 8000,
+  "temperature": 0,
+  "candidates_per_instance": 1,
+  "status": "development_only_not_frozen",
+  "context_policy": "whole_files_or_fail_closed",
+  "max_code_utf8_bytes": 72000,
+  "notes": "Development runner uses an explicit byte cap, NOT a 24k-token claim. Oversized contexts stop for a shared tokenizer-aware packer; no silent file-head truncation. Formal test feedback and autonomous repository search disabled."
+}

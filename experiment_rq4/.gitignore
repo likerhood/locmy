@@ -1,0 +1,9 @@
+.venv/
+.env.local
+vendor/
+data/evaluation_only/
+snapshots/
+runs/
+__pycache__/
+repos/
+reports/server_dependencies.txt

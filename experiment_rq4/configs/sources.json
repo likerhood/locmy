@@ -1,0 +1,38 @@
+{
+  "swe": {
+    "locagent": {
+      "path": "LocAgent/newtest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/location/merged_loc_outputs_mrr.jsonl",
+      "field": "found_files"
+    },
+    "cosil": {
+      "path": "CoSIL/newtest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/file_level/loc_outputs.jsonl",
+      "field": "found_files"
+    },
+    "gala": {
+      "path": "GALA/mytest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/loc_results.json",
+      "field": "final_files"
+    },
+    "graphlocator": {
+      "path": "GraphLocator/newtest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/loc_results.json",
+      "field": "found_files"
+    },
+    "magnet": {
+      "path": "alltry/mycode/result/swe_clean15_agent_Qwen3.5-397B-A17B_swe_clean15_front_rank_v1/agent_traces.jsonl",
+      "field": "ranked.files",
+      "item_key": "path",
+      "note": "trace_recorder._top_paths exports first15 ranked_locations in order; sufficient for Top5"
+    }
+  },
+  "omni": {
+    "locagent": null,
+    "cosil": null,
+    "gala": null,
+    "graphlocator": null,
+    "magnet": {
+      "path": "alltry/mycode/result/102omni_clean15_agent_Qwen3.5-397B-A17B_omni_clean15_grounded_checkpoint_r4/agent_traces.jsonl",
+      "field": "ranked.files",
+      "item_key": "path",
+      "note": "trace_recorder._top_paths exports first15 ranked_locations in order; sufficient for Top5"
+    }
+  }
+}

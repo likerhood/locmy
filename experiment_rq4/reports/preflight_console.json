@@ -1,0 +1,59 @@
+{
+  "api_configured": true,
+  "predictions": {
+    "swe/locagent": {
+      "rows": 50,
+      "available": 50
+    },
+    "swe/cosil": {
+      "rows": 50,
+      "available": 50
+    },
+    "swe/gala": {
+      "rows": 50,
+      "available": 50
+    },
+    "swe/graphlocator": {
+      "rows": 50,
+      "available": 50
+    },
+    "swe/magnet": {
+      "rows": 50,
+      "available": 50
+    },
+    "omni/locagent": {
+      "rows": 0,
+      "available": 0
+    },
+    "omni/cosil": {
+      "rows": 0,
+      "available": 0
+    },
+    "omni/gala": {
+      "rows": 0,
+      "available": 0
+    },
+    "omni/graphlocator": {
+      "rows": 0,
+      "available": 0
+    },
+    "omni/magnet": {
+      "rows": 50,
+      "available": 50
+    }
+  },
+  "formal_blockers": [
+    "50+50 environment no-op/gold controls not executed",
+    "MAGNET SWE front_rank_v1 and Omni r4 are different versions; choose common frozen method",
+    "input compact evidence provenance and model identity require audit",
+    "development repair uses byte budget; formal tokenizer-aware context policy not frozen",
+    "Docker daemon unavailable in this environment",
+    "omni/locagent: missing predictions",
+    "omni/cosil: missing predictions",
+    "omni/gala: missing predictions",
+    "omni/graphlocator: missing predictions"
+  ],
+  "docker_available": false,
+  "agentless_commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
+  "swebench_import_available": false
+}

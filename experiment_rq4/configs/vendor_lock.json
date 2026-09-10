@@ -1,0 +1,8 @@
+{
+  "Agentless": {
+    "url": "https://github.com/OpenAutoCoder/Agentless.git",
+    "commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
+    "clone": "shallow",
+    "upstream_modified": false
+  }
+}

@@ -1,0 +1,111 @@
+{
+  "scope": "provisional50; no environment controls executed",
+  "datasets": {
+    "swe": {
+      "count": 50,
+      "source": "/home/like/locCode/alltry/mycode/data/swebench_multimodal-full-dev.clean15.samples.jsonl",
+      "sha256": "f792c513c07214979168cb778fcbc63986d65b39768f7121b2527b2afedf9c6b",
+      "input_policy": "existing problem_statement unchanged; compact evidence provenance/dedup pending"
+    },
+    "omni": {
+      "count": 50,
+      "source": "/home/like/locCode/alltry/mycode/data/omnigirl-full-candidates.clean15.v458.samples.jsonl",
+      "sha256": "dfb479d8731e5ebcea0012cba5cb90e003b955a2d0dbc5d93fc394c641694847",
+      "input_policy": "existing problem_statement unchanged; compact evidence provenance/dedup pending"
+    }
+  },
+  "predictions": [
+    {
+      "dataset": "swe",
+      "method": "locagent",
+      "status": "exported",
+      "source": "/home/like/locCode/LocAgent/newtest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/location/merged_loc_outputs_mrr.jsonl",
+      "source_sha256": "a775773b55078965638a0da7f660bd7af70793f1c6c04067f6d5aca0999f7fcb",
+      "field": "found_files",
+      "matched": 50,
+      "count": 50,
+      "normalized_sha256": "a336326a4b306d93d2dcf79e4d2281e3eb130b4210ea01e2bc80a53bd91acc7d",
+      "model_identity": "directory_label; provider identity audit pending"
+    },
+    {
+      "dataset": "swe",
+      "method": "cosil",
+      "status": "exported",
+      "source": "/home/like/locCode/CoSIL/newtest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/file_level/loc_outputs.jsonl",
+      "source_sha256": "3e5f89e02c362e19906bb1e48d6f5949767395ffe35c222a2df46d5391bbc3d5",
+      "field": "found_files",
+      "matched": 50,
+      "count": 50,
+      "normalized_sha256": "b8550f4a8e681950555a27433b03db07d97bd469c957f3f79965986f6d4f52d8",
+      "model_identity": "directory_label; provider identity audit pending"
+    },
+    {
+      "dataset": "swe",
+      "method": "gala",
+      "status": "exported",
+      "source": "/home/like/locCode/GALA/mytest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/loc_results.json",
+      "source_sha256": "2d4166842924c7c8ff9cf571f7e1e7ee8ecd0a993908eff7960e55c0753c8cfd",
+      "field": "final_files",
+      "matched": 50,
+      "count": 50,
+      "normalized_sha256": "dc7adaf755a4f6e80e16b05b88ce570f4352f824f8d9f7a302ec7e6604e176b4",
+      "model_identity": "directory_label; provider identity audit pending"
+    },
+    {
+      "dataset": "swe",
+      "method": "graphlocator",
+      "status": "exported",
+      "source": "/home/like/locCode/GraphLocator/newtest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/loc_results.json",
+      "source_sha256": "bea6d7376ed600d92d1225035528c2d6f8484038d8da4fa0d5bb5d8367039388",
+      "field": "found_files",
+      "matched": 50,
+      "count": 50,
+      "normalized_sha256": "93f81b19b6c072e7f8f59f9192b16ff8af99568adfd951247904482ca52d9a8b",
+      "model_identity": "directory_label; provider identity audit pending"
+    },
+    {
+      "dataset": "swe",
+      "method": "magnet",
+      "status": "exported",
+      "source": "/home/like/locCode/alltry/mycode/result/swe_clean15_agent_Qwen3.5-397B-A17B_swe_clean15_front_rank_v1/agent_traces.jsonl",
+      "source_sha256": "aab53e85527ff6e6fff41bd1b6bdd74c3ce807e700469f482163c25efb325cb5",
+      "field": "ranked.files",
+      "matched": 50,
+      "count": 50,
+      "normalized_sha256": "db298ba86489fb8f281370ca2a358e0b69f34119a5f4cbc9b8b2a2e15851188b",
+      "model_identity": "directory_label; provider identity audit pending"
+    },
+    {
+      "dataset": "omni",
+      "method": "locagent",
+      "status": "missing_source"
+    },
+    {
+      "dataset": "omni",
+      "method": "cosil",
+      "status": "missing_source"
+    },
+    {
+      "dataset": "omni",
+      "method": "gala",
+      "status": "missing_source"
+    },
+    {
+      "dataset": "omni",
+      "method": "graphlocator",
+      "status": "missing_source"
+    },
+    {
+      "dataset": "omni",
+      "method": "magnet",
+      "status": "exported",
+      "source": "/home/like/locCode/alltry/mycode/result/102omni_clean15_agent_Qwen3.5-397B-A17B_omni_clean15_grounded_checkpoint_r4/agent_traces.jsonl",
+      "source_sha256": "f0174292460d7bdfb420180469fb4d60cc6d3d8c845ff23dda2c0f678caa5fd1",
+      "field": "ranked.files",
+      "matched": 50,
+      "count": 50,
+      "normalized_sha256": "d38a429cadcca1011354f878a509c8eb42edd22f7009504ec5f00f8db77dafc9",
+      "model_identity": "directory_label; provider identity audit pending"
+    }
+  ]
+}

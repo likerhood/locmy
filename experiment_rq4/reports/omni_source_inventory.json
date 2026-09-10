@@ -1,0 +1,29 @@
+{
+  "locagent": {
+    "searched": "/home/like/locCode/LocAgent/newtest/omnigirl-full-candidates/results",
+    "model_directories": [
+      "mimo-v2.5",
+      "openai_qwen3-vl-8b"
+    ]
+  },
+  "cosil": {
+    "searched": "/home/like/locCode/CoSIL/newtest/omnigirl-full-candidates/results",
+    "model_directories": [
+      "mimo-v2.5",
+      "openai_qwen3-vl-8b"
+    ]
+  },
+  "gala": {
+    "searched": "/home/like/locCode/GALA/mytest/omnigirl-full-candidates/results",
+    "model_directories": [
+      "qwen3-vl-8b"
+    ]
+  },
+  "graphlocator": {
+    "searched": "/home/like/locCode/GraphLocator/newtest/omnigirl-full-candidates/results",
+    "model_directories": [
+      "mimo-v2.5",
+      "openai_qwen3-vl-8b"
+    ]
+  }
+}

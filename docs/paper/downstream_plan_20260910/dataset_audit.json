@@ -1,0 +1,106 @@
+{
+  "swe": {
+    "source": "/home/like/locCode/alltry/mycode/data/swebench_multimodal-full-dev.clean15.samples.jsonl",
+    "sha256": "f792c513c07214979168cb778fcbc63986d65b39768f7121b2527b2afedf9c6b",
+    "n": 92,
+    "repo_counts": {
+      "Automattic/wp-calypso": 33,
+      "chartjs/Chart.js": 22,
+      "diegomura/react-pdf": 10,
+      "markedjs/marked": 12,
+      "processing/p5.js": 15
+    },
+    "language_counts": {
+      "JavaScript/TypeScript": 92
+    },
+    "nonempty_test_patch": 92,
+    "empty_fail_to_pass": 0,
+    "empty_pass_to_pass": 40,
+    "image_url_instances": 92,
+    "issue_marker_counts": {
+      "3": 92
+    },
+    "compact_marker_counts": {
+      "3": 92
+    },
+    "repo_quotas": {
+      "Automattic/wp-calypso": 18,
+      "chartjs/Chart.js": 12,
+      "diegomura/react-pdf": 5,
+      "markedjs/marked": 7,
+      "processing/p5.js": 8
+    },
+    "selected_languages": {
+      "JavaScript/TypeScript": 50
+    },
+    "selected_image_url_instances": 50,
+    "selection": "repository-proportional Hamilton allocation; seeded SHA256 ordering within repo",
+    "seed": "magnet-downstream-20260910-v1",
+    "status": "provisional_not_harness_validated"
+  },
+  "omni": {
+    "source": "/home/like/locCode/alltry/mycode/data/omnigirl-full-candidates.clean15.v458.samples.jsonl",
+    "sha256": "dfb479d8731e5ebcea0012cba5cb90e003b955a2d0dbc5d93fc394c641694847",
+    "n": 458,
+    "repo_counts": {
+      "assertj/assertj": 11,
+      "babel/babel": 35,
+      "dateutil/dateutil": 19,
+      "google/gson": 9,
+      "iamkun/dayjs": 24,
+      "jestjs/jest": 6,
+      "netty/netty": 22,
+      "prettier/prettier": 74,
+      "pyca/cryptography": 9,
+      "python/mypy": 103,
+      "redis/redis-py": 8,
+      "statsmodels/statsmodels": 31,
+      "tailwindlabs/tailwindcss": 53,
+      "tqdm/tqdm": 15,
+      "webpack/webpack": 39
+    },
+    "language_counts": {
+      "Java": 42,
+      "TypeScript": 94,
+      "Python": 185,
+      "JavaScript": 137
+    },
+    "nonempty_test_patch": 458,
+    "empty_fail_to_pass": 0,
+    "empty_pass_to_pass": 224,
+    "image_url_instances": 34,
+    "issue_marker_counts": {
+      "1": 458
+    },
+    "compact_marker_counts": {
+      "1": 458
+    },
+    "repo_quotas": {
+      "assertj/assertj": 1,
+      "babel/babel": 4,
+      "dateutil/dateutil": 2,
+      "google/gson": 1,
+      "iamkun/dayjs": 3,
+      "jestjs/jest": 1,
+      "netty/netty": 2,
+      "prettier/prettier": 8,
+      "pyca/cryptography": 1,
+      "python/mypy": 11,
+      "redis/redis-py": 1,
+      "statsmodels/statsmodels": 3,
+      "tailwindlabs/tailwindcss": 6,
+      "tqdm/tqdm": 2,
+      "webpack/webpack": 4
+    },
+    "selected_languages": {
+      "Java": 4,
+      "TypeScript": 11,
+      "Python": 20,
+      "JavaScript": 15
+    },
+    "selected_image_url_instances": 1,
+    "selection": "repository-proportional Hamilton allocation; seeded SHA256 ordering within repo",
+    "seed": "magnet-downstream-20260910-v1",
+    "status": "provisional_not_harness_validated"
+  }
+}

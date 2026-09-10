@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/SWE-bench/SWE-bench.git",
+  "commit": "02e7a74ffd0b707aab73d203fe87bdc7c76afc8e",
+  "dataset": "SWE-bench/SWE-bench_Multimodal",
+  "dataset_revision": "4e6662d51c48e475f7f346e4fa09a6f8b31fcaa5",
+  "compatibility": "Must pass local id/base_commit/patch/test_patch checks and no-op/gold controls; not yet Docker-validated locally"
+}

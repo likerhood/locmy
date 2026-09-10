@@ -24,6 +24,7 @@ class RepositoryAssets:
     structure_path: Path | None
     source: str
     base_commit: str
+    source_error: str = ""
 
 
 def prepare_repository_assets(
@@ -42,12 +43,17 @@ def prepare_repository_assets(
     if structure_path is not None:
         repo_root = find_repo_root(sample.repo, sample.dataset, base_commit=base_commit)
         source = "existing_structure"
+        source_error = ""
         require_source_checkout = os.environ.get(
             "MYCODE_REQUIRE_SOURCE_CHECKOUT", "0"
         ).strip().lower() in {"1", "true", "yes", "on"}
         if repo_root is None and auto_fetch and require_source_checkout:
-            repo_root = ensure_repo_checkout(sample.repo, base_commit)
-            source = "existing_structure_with_standalone_checkout"
+            try:
+                repo_root = ensure_repo_checkout(sample.repo, base_commit)
+                source = "existing_structure_with_standalone_checkout"
+            except RepositoryAssetError as exc:
+                source_error = str(exc)
+                source = "existing_structure_checkout_unavailable"
         return RepositoryAssets(
             # Reuse the canonical structure snapshot for indexing. Full evidence
             # runs may additionally require an exact checkout for source quotes,
@@ -56,6 +62,7 @@ def prepare_repository_assets(
             structure_path=structure_path,
             source=source,
             base_commit=base_commit,
+            source_error=source_error,
         )
 
     repo_root = find_repo_root(sample.repo, sample.dataset, base_commit=base_commit)

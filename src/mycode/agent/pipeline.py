@@ -107,6 +107,10 @@ def run_localization_pipeline(
         )
     structure_path = assets.structure_path if assets else None
     repo_root = assets.repo_root if assets else NO_REPO_ROOT
+    asset_error = assets.source_error if assets else asset_error
+    if asset_error and assets:
+        phase_event("error", "repository_assets", error=asset_error,
+                    fallback="canonical_structure", base_commit=assets.base_commit)
 
     with phase_context(
         "evidence_agent",

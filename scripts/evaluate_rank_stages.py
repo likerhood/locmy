@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-KS = (1, 2, 3, 4, 5, 6, 15)
+KS = (1, 2, 3, 4, 5, 6, 7, 8, 15)
 
 
 def _paths(rows: Iterable[dict[str, Any]]) -> list[str]:
@@ -60,6 +60,9 @@ def evaluate(path: Path) -> dict[str, Any]:
                     bucket["mrr_sum"] += 1.0 / first_rank
                 for k in KS:
                     bucket[f"hits@{k}"] += float(any(item in gold for item in predicted[:k]))
+                    covered = gold.intersection(predicted[:k])
+                    bucket[f"sl@{k}"] += float(covered == gold)
+                    bucket[f"recall@{k}"] += len(covered) / len(gold)
     metrics: dict[str, Any] = {}
     for stage, values in sorted(totals.items()):
         samples = int(values["samples"])
@@ -70,17 +73,20 @@ def evaluate(path: Path) -> dict[str, Any]:
                 for k in KS
             },
             "mrr": round(100.0 * values["mrr_sum"] / max(1, samples), 2),
+            **{f"{metric}@{k}": round(100.0 * values[f"{metric}@{k}"] / max(1, samples), 2)
+               for metric in ("sl", "recall") for k in KS},
         }
     return {"input": str(path), "records": records, "malformed": malformed, "stages": metrics}
 
 
 def _markdown(report: dict[str, Any]) -> str:
-    header = "| Stage | N | Acc@1 | Acc@3 | Acc@6 | Acc@15 | MRR |"
-    lines = ["# Ranking Stage Metrics", "", header, "|---|---:|---:|---:|---:|---:|---:|"]
+    header = "| Stage | N | Acc@1 | Acc@3 | Acc@6 | Acc@8 | Acc@15 | MRR | SL@15 | Recall@15 |"
+    lines = ["# Ranking Stage Metrics", "", header, "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for stage, row in report["stages"].items():
         lines.append(
             f"| {stage} | {row['samples']} | {row['acc@1']:.2f} | {row['acc@3']:.2f} | "
-            f"{row['acc@6']:.2f} | {row['acc@15']:.2f} | {row['mrr']:.2f} |"
+            f"{row['acc@6']:.2f} | {row['acc@8']:.2f} | {row['acc@15']:.2f} | {row['mrr']:.2f} | "
+            f"{row['sl@15']:.2f} | {row['recall@15']:.2f} |"
         )
     lines.extend(["", f"Records: {report['records']}; malformed lines: {report['malformed']}."])
     return "\n".join(lines) + "\n"

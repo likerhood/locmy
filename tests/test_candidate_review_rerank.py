@@ -152,7 +152,7 @@ def test_candidate_review_uses_compact_evidence_ids_and_stage_token_budget(monke
             {
                 "path": "src/parser.js",
                 "entities": [{"kind": "function", "name": "tokenize"}],
-                "snippets": [{"text": "function tokenize(input) { return input.filter(Boolean); }"}],
+                "snippets": [{"text": "return input.filter(Boolean);"}],
             }
         ],
         flow_traces=[

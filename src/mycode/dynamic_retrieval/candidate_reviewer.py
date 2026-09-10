@@ -307,6 +307,11 @@ def _prompt(
         "a supplied snippet directly supports the responsibility; a supplied entity belongs to that source; "
         "a supplied flow connects the candidate to the observed behavior; and the causal chain explains "
         "state or input -> operation -> incorrect effect.\n"
+        "The checkout is BEFORE the fix. Verify ownership of the existing faulty operation or missing-check "
+        "insertion point; never demand that the requested fix already exists. For missing behavior, explain "
+        "which existing operation needs the check and its observed consequence. A related caller or consumer "
+        "is not the owner merely because it shares a flow. Supplied entity IDs are repository-grounded; "
+        "a short snippet may omit the enclosing function declaration.\n"
         "Use snippet_id, entity_id, and flow_id exactly as supplied. Never copy issue text as source evidence. "
         "Words such as likely, probably, or path similarity are not verification. Generated artifacts, tests, "
         "documentation, and external reproduction files cannot be selected unless the issue explicitly targets them.\n"
@@ -398,7 +403,8 @@ def _validate(
         supported_entities = [
             entity
             for entity in entities
-            if str(entity.get("name") or "").lower() in entity_support_text
+            if (compact_schema and selected_entity is not None)
+            or str(entity.get("name") or "").lower() in entity_support_text
         ]
         unsupported_entities = [entity for entity in entities if entity not in supported_entities]
         entity_supported = bool(supported_entities)

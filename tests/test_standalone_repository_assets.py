@@ -194,3 +194,29 @@ def test_existing_structure_can_require_exact_source_checkout(
     assert assets.structure_path == structure
     assert assets.repo_root == checkout
     assert assets.source == "existing_structure_with_standalone_checkout"
+
+
+def test_checkout_failure_preserves_canonical_structure(tmp_path: Path, monkeypatch) -> None:
+    from mycode.repo_index import repository_assets as module
+
+    structure = tmp_path / "snapshot.json"
+    structure.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("MYCODE_REQUIRE_SOURCE_CHECKOUT", "1")
+    monkeypatch.setattr(module, "find_repo_structure", lambda *a, **kw: structure)
+    monkeypatch.setattr(module, "find_repo_root", lambda *a, **kw: None)
+
+    def unavailable(*args):
+        raise module.RepositoryAssetError("checkout transport unavailable")
+
+    monkeypatch.setattr(module, "ensure_repo_checkout", unavailable)
+    sample = NormalizedSample(
+        instance_id="external__fixture-3", repo="external/fixture",
+        dataset="swebench_multimodal-full-dev-clean15", issue_text="Fix parsing",
+        raw={"base_commit": "abc123"},
+    )
+    assets = module.prepare_repository_assets(sample, structure_only=True, auto_fetch=True)
+    assert assets.repo_root == module.NO_REPO_ROOT
+    assert assets.structure_path == structure
+    assert assets.base_commit == "abc123"
+    assert assets.source == "existing_structure_checkout_unavailable"
+    assert "transport unavailable" in assets.source_error

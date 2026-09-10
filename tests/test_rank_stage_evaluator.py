@@ -29,3 +29,5 @@ def test_rank_stage_evaluator_reports_early_accuracy(tmp_path: Path) -> None:
     assert report["stages"]["fast_seed"]["acc@1"] == 50.0
     assert report["stages"]["head_selector"]["acc@1"] == 100.0
     assert report["stages"]["fast_seed"]["acc@3"] == 100.0
+    assert report["stages"]["fast_seed"]["sl@1"] == 50.0
+    assert report["stages"]["fast_seed"]["recall@15"] == 100.0

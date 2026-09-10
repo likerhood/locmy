@@ -26,6 +26,7 @@ from mycode.flow_analysis.statement_flow import trace_statement_flows
 from mycode.dynamic_retrieval.controller import LLMController, decide_next_actions
 from mycode.dynamic_retrieval.candidate_reviewer import review_candidates
 from mycode.dynamic_retrieval.fast_seed_planner import plan_fast_seeds
+from mycode.dynamic_retrieval.seed_frontier import restore_seed_frontier, demote_generated_outputs
 from mycode.dynamic_retrieval.navigation_policy import select_navigation_actions, summarize_agent_observation
 from mycode.dynamic_retrieval.react_agent import run_react_tool_agent
 from mycode.dynamic_retrieval.tools import run_four_tool_agent_round
@@ -3895,7 +3896,7 @@ def _cross_round_candidate_frontier(
     replacement_margin = _env_float("MYCODE_CROSS_ROUND_REPLACEMENT_MARGIN", 0.75, minimum=0.0)
     protected_prefix = min(
         len(selected_paths),
-        _env_int("MYCODE_CROSS_ROUND_PROTECTED_PREFIX", 6, minimum=0),
+        _env_int("MYCODE_CROSS_ROUND_PROTECTED_PREFIX", 0, minimum=0),
     )
     for challenger in challengers:
         if len(replacements) >= max_replacements:
@@ -7370,6 +7371,15 @@ def dynamic_localize(
         "best_round": _rank_stage_snapshot(ranked, limit=top_k),
     }
     ranked, artifact_mappings = _transfer_artifact_evidence(ranked, index)
+    ranked, seed_retention = restore_seed_frontier(
+        ranked,
+        [item for item in initial_seed_ranking if item.path in fast_seed_paths],
+        index=index,
+        review=merged_candidate_review,
+        top_k=top_k,
+        limit=_env_int("MYCODE_FINAL_SEED_PREFIX", 2, minimum=0),
+    )
+    rank_stage_snapshots["seed_retention"] = _rank_stage_snapshot(ranked, limit=top_k)
     ranked, cross_round_frontier = _cross_round_candidate_frontier(
         selected=ranked,
         round_rankings=[initial_seed_ranking] + [item.ranked_locations for item in rounds],
@@ -7403,6 +7413,7 @@ def dynamic_localize(
         "updates": checkpoint_updates,
         "cross_round_frontier": cross_round_frontier,
         "precision_rerank": precision_rerank,
+        "seed_retention": seed_retention,
     }
     phase_event(
         "progress",
@@ -7463,6 +7474,10 @@ def dynamic_localize(
         modification_closure,
         top_k=top_k,
     )
+    ranked, generated_mappings = demote_generated_outputs(
+        ranked, files=index.files, issue_text=_issue_query_text(sample.issue_text),
+    )
+    artifact_mappings.extend(generated_mappings)
     rank_stage_snapshots["modification_closure"] = _rank_stage_snapshot(ranked, limit=top_k)
     modification_closure["ranking_adjustment"] = closure_rerank
     modification_closure["ranking_kept_separate"] = not bool(closure_rerank.get("applied"))

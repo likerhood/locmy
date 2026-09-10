@@ -267,7 +267,10 @@ def heuristic_controller_decisions(
             )
         )
 
-    if _text_has(low, "mypy", "binder", "typeinfo", "typetype", "deleted variable", "symbol table", "declaration"):
+    from mycode.flow_analysis.language_context import python_binding_context
+
+    if python_binding_context(issue_text, repo=str(evidence_result.get("repo") or ""),
+                              paths=current_seed_files):
         decisions.append(
             ControllerDecision(
                 tool="TraceFlow",

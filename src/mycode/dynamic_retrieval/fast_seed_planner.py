@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from mycode.repo_index.structure_index import RepositoryIndex
+from mycode.dynamic_retrieval.package_navigation import package_entry_candidates, navigation_only_file
 
 
 LLMController = Callable[[str], str | dict[str, Any]]
@@ -164,6 +165,11 @@ def plan_fast_seeds(
             reasons[hit.path].extend(hit.reasons[:2])
 
     issue_normalized = str(issue_text or "").replace("\\", "/").lower()
+    package_entries = package_entry_candidates(index.files, issue_text)
+    for path in package_entries:
+        scores[path] += 1.0
+        channels[path].add("issue_package")
+        reasons[path].append("issue_supported_package_entry_requires_source_verification")
     for path in list(scores):
         parts = {part.lower() for part in Path(path).parts}
         if path.lower() in issue_normalized:
@@ -173,6 +179,9 @@ def plan_fast_seeds(
         if parts & NOISE_PARTS:
             scores[path] *= 0.30
             reasons[path].append("noise_path_penalty")
+        if navigation_only_file(path, issue_text):
+            scores[path] *= 0.10
+            reasons[path].append("public_navigation_file_not_task_target")
 
     ordered = sorted(scores, key=lambda path: (-scores[path], path))
     candidate_files = _dedupe(local_anchors + ordered, limit=candidate_limit)
@@ -198,6 +207,9 @@ def plan_fast_seeds(
             "Prefer editable implementation files supported by independent path, symbol, workflow, or local-code "
             "evidence. Treat images and reproduction URLs as navigation evidence only. Generated artifacts, "
             "bundles, demos, tests, and docs are navigation-only unless the issue explicitly targets them.\n"
+            "Package-entry hints identify a subsystem, not a proven patch target. Trace the failing operation "
+            "inside that package; do not prefer a repository-wide build file for a runtime or compiler defect. "
+            "For compiler defects distinguish parsing, AST transformation, scope analysis and code generation.\n"
             "Rank files by edit responsibility, not lexical similarity. Return compact JSON only.\n\n"
             f"Issue:\n{issue_text[:5000]}\n\nCandidate Files:\n" + "\n".join(summaries) +
             "\n\nChoose responsibility candidates that should be source-verified next. "
@@ -228,6 +240,7 @@ def plan_fast_seeds(
         for path in selected
         if (
             _source_candidate(path)
+            and not navigation_only_file(path, issue_text)
             and (
                 len(channels[path]) >= 2
                 or "local_code_url" in channels[path]
@@ -236,9 +249,11 @@ def plan_fast_seeds(
             )
         )
     ]
-    source_candidates = [path for path in candidate_files if _source_candidate(path)]
+    source_candidates = [path for path in candidate_files if _source_candidate(path)
+                         and not navigation_only_file(path, issue_text)]
     seed_files = _dedupe(
-        [path for path in local_anchors if _source_candidate(path)]
+        [path for path in local_anchors if _source_candidate(path)
+         and not navigation_only_file(path, issue_text)]
         + selected_supported
         + source_candidates,
         limit=seed_limit,

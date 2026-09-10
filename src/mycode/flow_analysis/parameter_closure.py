@@ -234,7 +234,9 @@ def _classify_closure(term: str, locations: list[dict[str, Any]], edges: list[di
     ).lower()
     if any(token in text for token in ("kdf", "serialize", "serializer", "backend", "private_key", "ssh")):
         return "serializer_backend_call_chain"
-    if any(token in text for token in ("binder", "declaration", "typeinfo", "typevars", "deleted variable", "narrow")):
+    from mycode.flow_analysis.language_context import python_binding_context
+
+    if python_binding_context(text, paths=[item.get("path", "") for item in locations]):
         return "python_type_binding_flow"
     if any(token in text for token in ("style", "stylesheet", "resolve", "expand", "margin", "layout", "yoga")):
         return "visual_style_pipeline_flow"

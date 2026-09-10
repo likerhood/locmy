@@ -158,6 +158,11 @@ def run_localization_pipeline(
             ready=repo_index.ready,
             file_count=len(repo_index.files),
             entity_count=len(repo_index.entities),
+            readable_file_count=sum(isinstance(text, str) and bool(text.strip())
+                                    for text in repo_index.files.values()),
+            entity_file_count=len({entity.path for entity in repo_index.entities}),
+            base_commit=assets.base_commit if assets else "",
+            checkout_available=bool(repo_root and repo_root != NO_REPO_ROOT and repo_root.is_dir()),
             asset_source=assets.source if assets else "error",
             asset_error=asset_error,
         )

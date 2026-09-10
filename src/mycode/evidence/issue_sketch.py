@@ -633,7 +633,8 @@ def _evidence_roles(packet: dict[str, Any], tool_observations: list[dict[str, An
     return roles, hints, seed_policy
 
 
-def _flow_obligations(text: str, states: list[str], concerns: list[str], effects: list[str]) -> list[dict[str, Any]]:
+def _flow_obligations(text: str, states: list[str], concerns: list[str], effects: list[str], *, repo: str = "") -> list[dict[str, Any]]:
+    from mycode.flow_analysis.language_context import python_binding_context
     haystack = " ".join([text, " ".join(states), " ".join(concerns), " ".join(effects)]).lower()
     obligations: list[dict[str, Any]] = []
 
@@ -666,17 +667,21 @@ def _flow_obligations(text: str, states: list[str], concerns: list[str], effects
         add("visual_style_pipeline_flow", "style property/config", "layout/rendered output", "CALL+CONFIG", "Visual layout bugs need style expansion/resolve pipeline tracing.")
     if any(token in haystack for token in ("redirect", "href", "url builder", "route", "post_id", "client_id", "link")):
         add("url_builder_or_route_flow", "route/url parameters", "navigation target", "CALL+DATA", "Visible route/link bugs usually terminate in URL builder or route mapping code.")
-    if any(token in haystack for token in ("mypy", "typeinfo", "deleted variable", "binder", "declaration", "typevars")):
+    if python_binding_context(text, repo=repo):
         add("python_type_binding_flow", "symbol table / TypeInfo", "diagnostic/error behavior", "TYPE_FLOW", "Type checker bugs require binding and narrowing state tracing.")
     if any(token in haystack for token in ("option", "config", "flag", "parameter", "rounds")):
         add("parameter_or_config_flow", "option/config parameter", "downstream behavior", "PARAMETER", "Configuration mentioned in issue must be checked through consumers.")
-    if any(token in haystack for token in ("markdown", "lexer", "tokenizer", "parser", "parse rule", "emphasis")):
+    compiler_context = bool(
+        re.search(r"\b(?:babel|compiler|transpiler)\b", (repo + " " + text).lower())
+        and re.search(r"\b(?:parse\w*|syntax|scope|shadowing|declaration|transform\w*|destructur\w*|generator|ast)\b", text.lower())
+    )
+    if compiler_context or any(token in haystack for token in ("markdown", "lexer", "tokenizer", "parser", "parse rule", "emphasis")):
         add(
             "parser_tokenizer_flow",
-            "input/token/rule",
-            "parsed or rendered output",
+            "AST/scope/transformation" if compiler_context else "input/token/rule",
+            "generated code or diagnostic" if compiler_context else "parsed or rendered output",
             "CALL+DATA",
-            "Parser defects should be traced through rules, tokenization, parsing and rendering rather than URL configuration.",
+            "Trace the issue-specific parser, transformation or generator operation through CALL/DATA edges; a compiler package name is only an entry point." if compiler_context else "Parser defects should be traced through rules, tokenization, parsing and rendering rather than URL configuration.",
         )
     return obligations
 
@@ -742,7 +747,7 @@ def build_issue_sketch(sample: NormalizedSample, evidence_result: dict[str, Any]
             reason=str(item.get("description") or "Role inferred by evidence-understanding LLM."),
             metadata={"provenance": "llm_understanding"},
         )
-    obligations = _flow_obligations(text, states, concerns, effects)
+    obligations = _flow_obligations(text, states, concerns, effects, repo=sample.repo)
     navigation_hints = list(hints)
     hypotheses = [
         {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
+from mycode.dynamic_retrieval.package_navigation import navigation_only_file
 
 
 def generated_source_counterpart(path, files):
@@ -29,6 +30,9 @@ def demote_generated_outputs(ranked, *, files, issue_text):
     outputs = set()
     for item in ranked:
         target = generated_source_counterpart(item.path, files)
+        if navigation_only_file(item.path, issue_text):
+            outputs.add(item.path)
+            item.reasons.append("navigation_only_file_demoted_for_task")
         if target:
             outputs.add(item.path)
             mappings.append({"artifact": item.path, "source": target,

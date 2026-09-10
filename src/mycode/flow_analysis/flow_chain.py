@@ -551,7 +551,9 @@ def _classify_flow(term: str, steps: list[dict[str, Any]], edges: list[dict[str,
     ).lower()
     if any(token in text for token in ("kdf", "serialize", "serializer", "backend", "private_key", "openssh", "ssh")):
         return "serializer_backend_flow_chain"
-    if any(token in text for token in ("binder", "declaration", "typeinfo", "typetype", "typevars", "deleted variable", "narrow")):
+    from mycode.flow_analysis.language_context import python_binding_context
+
+    if python_binding_context(text, paths=[step.get("path", "") for step in steps]):
         return "python_type_binding_flow_chain"
     if any(token in text for token in ("stylesheet", "style", "resolve", "expand", "margin", "layout", "yoga", "pdf")):
         return "style_pipeline_flow_chain"

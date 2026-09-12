@@ -286,6 +286,7 @@ def _statement_edges(index: RepositoryIndex, statements: list[dict[str, Any]]) -
 
 
 def _role(path: str, statements: list[dict[str, Any]]) -> str:
+    from mycode.flow_analysis.language_context import python_binding_context
     text = f"{path} {' '.join(str(item.get('code') or '') for item in statements[:6])}".lower()
     if any(tok in text for tok in ("example", "demo", "playground", "sandbox")):
         return "reproduction_or_example"
@@ -303,16 +304,17 @@ def _role(path: str, statements: list[dict[str, Any]]) -> str:
         return "style_or_layout_pipeline"
     if any(tok in text for tok in ("url", "href", "redirect", "route", "post", "site")):
         return "url_builder_or_route"
-    if any(tok in text for tok in ("typeinfo", "binder", "declaration", "deleted")):
+    if python_binding_context(text, paths=[path]):
         return "type_binder"
     return "implementation"
 
 
 def _classify_flow(term: str, statements: list[dict[str, Any]], edges: list[dict[str, Any]]) -> str:
+    from mycode.flow_analysis.language_context import python_binding_context
     text = f"{term} {' '.join(str(item.get('code') or '') for item in statements[:20])} {' '.join(str(edge.get('relation') or '') for edge in edges)}".lower()
     if any(tok in text for tok in ("serialize", "serializer", "private_key", "openssh", "kdf", "round")):
         return "serializer_backend_statement_flow"
-    if any(tok in text for tok in ("binder", "typeinfo", "declaration", "deleted", "narrow")):
+    if python_binding_context(text, paths=[item.get("path", "") for item in statements]):
         return "python_type_binding_statement_flow"
     if any(tok in text for tok in ("hover", "leave", "onclick", "handler", "legend")):
         return "ui_event_statement_flow"

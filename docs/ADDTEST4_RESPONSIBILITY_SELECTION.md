@@ -33,6 +33,34 @@ The head pass preserves all other candidates' relative order. Seed restoration
 can change the prefix and still truncates to top_k, so deep recall must be checked.
 No extra LLM call, dynamic round or flow backend is introduced.
 
+## Omni follow-up
+
+The statement and static-slice backends now gate both Python flow labels and
+type-binder roles with source-language evidence. Concrete non-Python paths cannot
+be overridden by Python words in a query or comment. This remains heuristic
+classification, not a new interprocedural dataflow engine.
+
+Package entry hints now cover Java top-level modules with src/main/java, Python
+packages identified by __init__.py, and real lib JavaScript/TypeScript source.
+Specific package or filename evidence is required. The two-files-per-package
+and total limits remain, and global retrieval is unchanged.
+
+Source context selection ranks query/entity anchors across each already-loaded
+candidate file instead of stopping at the earliest three hits. It retains at
+most 24 anchor positions while scanning and emits at most three non-overlapping
+windows. The reviewer still consumes at most two snippets. No extra model calls
+are introduced. This is targeted context selection, not an additional retrieval
+loop; missing source and absent anchors still produce no fabricated evidence.
+
+Omni accuracy and runtime improvements remain unmeasured. Full variable slicing,
+additional missing-source retrieval and broader event/style classification are
+not part of this follow-up.
+
+Follow-up verification: offline regression 199 passed, 1 skipped in 66.59
+seconds (the same three real-API modules excluded). After the final role-gating
+change, the 76 targeted navigation, responsibility and candidate-review tests
+were rerun and passed. No online benchmark was run.
+
 ## Ablation controls
 
 Defaults:

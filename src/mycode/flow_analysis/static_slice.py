@@ -205,6 +205,7 @@ def _statement_kind(code: str, defs: list[str], uses: list[str], calls: list[str
 
 
 def _role(path: str, code: str) -> str:
+    from mycode.flow_analysis.language_context import python_binding_context
     text = f"{path}\n{code}".lower()
     if any(part in text for part in ("/example", "/examples", "playground", "sandbox", "demo")):
         return "reproduction_or_example"
@@ -222,7 +223,7 @@ def _role(path: str, code: str) -> str:
         return "style_or_layout_pipeline"
     if any(part in text for part in ("url", "href", "redirect", "route", "post", "site")):
         return "url_builder_or_route"
-    if any(part in text for part in ("binder", "typeinfo", "declaration", "deleted", "semantic")):
+    if python_binding_context(text, paths=[path]):
         return "type_binder"
     return "implementation"
 
@@ -443,12 +444,13 @@ def _build_slice_edges(index: RepositoryIndex, nodes: list[StatementNode]) -> tu
 
 
 def _flow_type(term: str, nodes: list[StatementNode], edges: list[dict[str, Any]]) -> str:
+    from mycode.flow_analysis.language_context import python_binding_context
     text = f"{term}\n" + "\n".join(node.code for node in nodes[:30])
     text += "\n" + "\n".join(edge.get("relation", "") for edge in edges)
     low = text.lower()
     if any(token in low for token in ("kdf", "openssh", "private_key", "serialize", "serializer", "backend")):
         return "serializer_backend_static_slice"
-    if any(token in low for token in ("binder", "typeinfo", "declaration", "deleted", "narrow")):
+    if python_binding_context(text, paths=[node.path for node in nodes]):
         return "python_type_binding_static_slice"
     if any(token in low for token in ("hover", "leave", "mousemove", "mouseout", "legend", "onclick")):
         return "ui_event_static_slice"

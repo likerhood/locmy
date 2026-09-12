@@ -1359,6 +1359,8 @@ def _read_code_context(
     *,
     limit: int = 8,
 ) -> list[dict[str, Any]]:
+    from heapq import nlargest
+
     terms = [term for term in _dedupe(queries) if len(term) >= 3]
     contexts: list[dict[str, Any]] = []
     for item in list(ranked)[:limit]:
@@ -1367,19 +1369,35 @@ def _read_code_context(
             continue
         lines = text.splitlines()
         matched = []
-        lower_lines = [line.lower() for line in lines]
-        for idx, lower in enumerate(lower_lines):
-            if any(term.lower() in lower for term in terms[:60]):
-                start = max(0, idx - 3)
-                end = min(len(lines), idx + 6)
-                matched.append(
-                    {
-                        "start_line": start + 1,
-                        "end_line": end,
-                        "text": "\n".join(f"{line_no + 1}: {lines[line_no]}" for line_no in range(start, end)),
-                    }
-                )
-            if len(matched) >= 3:
+        entity_names = [str(entity.get("name") or "").split(".")[-1].lower()
+                        for entity in item.entities[:8] if isinstance(entity, dict)]
+        needles = {term.lower(): min(6, len(term.split()) + 1) for term in terms[:60]}
+        for name in entity_names:
+            if len(name) >= 3:
+                needles[name] = 8
+        patterns = [(re.compile(r"(?<![\w$])" + re.escape(term) + r"(?![\w$])"), weight)
+                    for term, weight in needles.items()]
+
+        def scored_lines():
+            for idx, line in enumerate(lines):
+                lower = line.lower()
+                score = sum(weight for pattern, weight in patterns if pattern.search(lower))
+                if score:
+                    yield score, -idx
+
+        # Bound ranking memory and keep distinct windows around the best anchors.
+        for score, negative_idx in nlargest(24, scored_lines()):
+            idx = -negative_idx
+            start, end = max(0, idx - 3), min(len(lines), idx + 6)
+            if any(start < snippet["end_line"] and end > snippet["start_line"] - 1 for snippet in matched):
+                continue
+            matched.append({
+                "start_line": start + 1,
+                "end_line": end,
+                "text": "\n".join(f"{line_no + 1}: {lines[line_no]}" for line_no in range(start, end)),
+                "anchor_score": score,
+            })
+            if len(matched) == 3:
                 break
         contexts.append(
             {

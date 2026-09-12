@@ -27,6 +27,7 @@ from mycode.dynamic_retrieval.controller import LLMController, decide_next_actio
 from mycode.dynamic_retrieval.candidate_reviewer import review_candidates
 from mycode.dynamic_retrieval.fast_seed_planner import plan_fast_seeds
 from mycode.dynamic_retrieval.seed_frontier import restore_seed_frontier, demote_generated_outputs
+from mycode.dynamic_retrieval.responsibility import responsibility_evidence
 from mycode.dynamic_retrieval.navigation_policy import select_navigation_actions, summarize_agent_observation
 from mycode.dynamic_retrieval.react_agent import run_react_tool_agent
 from mycode.dynamic_retrieval.tools import run_four_tool_agent_round
@@ -4194,6 +4195,15 @@ def _precision_rerank_locations(
             and implementation_evidence
         )
 
+        responsibility = responsibility_evidence(decision)
+        if _env_bool("MYCODE_HEAD_REQUIRE_RESPONSIBILITY", True):
+            head_eligible = bool(
+                role_allowed_at_head and read_verified and responsibility["supported"]
+            )
+            # A blocked/non-source incumbent can still be replaced by the
+            # existing source fallback; ordinary source heads require ownership.
+            strong_top_challenger = head_eligible
+
         item.score_components["precision_evidence_quality"] = round(quality, 3)
         item.belief["precision_rerank"] = {
             "quality": round(quality, 3),
@@ -4211,6 +4221,8 @@ def _precision_rerank_locations(
             "head_eligible": head_eligible,
             "blocked_head_fallback_eligible": blocked_head_fallback_eligible,
             "role_allowed_at_head": role_allowed_at_head,
+            "responsibility_supported": responsibility["supported"],
+            "responsibility_missing": responsibility["missing"],
             "evidence": evidence_reasons,
         }
         rows.append((quality, base_rank, item, item.belief["precision_rerank"]))
@@ -4223,7 +4235,7 @@ def _precision_rerank_locations(
     eligible = [row for row in rows[:head_limit] if row[3].get("head_eligible")]
     incumbent_role = _path_role(incumbent[2].path)
     incumbent_blocked = bool(
-        incumbent_role in _CLOSURE_BLOCKED_ROLES
+        not incumbent[3].get("role_allowed_at_head")
         or (
             incumbent_role == "declaration_or_schema"
             and not any(
@@ -4264,6 +4276,22 @@ def _precision_rerank_locations(
         "candidate_count": len(reranked),
         "head_candidate_limit": head_limit,
         "replacement_margin": margin,
+        "responsibility_required": _env_bool("MYCODE_HEAD_REQUIRE_RESPONSIBILITY", True),
+        "head_comparison": {
+            "incumbent": incumbent[2].path,
+            "selected": chosen[2].path,
+            "reason": (
+                "responsibility_challenger" if chosen[1] != 1 and chosen[3].get("head_eligible")
+                else "blocked_head_source_fallback" if chosen[1] != 1
+                else "retain_incumbent"
+            ),
+        },
+        "responsibility_checks": [
+            {"path": row[2].path,
+             "supported": row[3].get("responsibility_supported"),
+             "missing": row[3].get("responsibility_missing", [])}
+            for row in rows[:head_limit]
+        ],
         "head_replaced": chosen[1] != 1,
         "selected_head": chosen[2].path,
         "selected_head_quality": round(chosen[0], 3),

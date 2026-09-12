@@ -124,6 +124,8 @@ def collect_runtime_capabilities() -> dict[str, Any]:
         "MYCODE_CROSS_ROUND_PROTECTED_PREFIX",
         "MYCODE_FINAL_SEED_PREFIX",
         "MYCODE_HEAD_REPLACEMENT_MARGIN",
+        "MYCODE_HEAD_REQUIRE_RESPONSIBILITY",
+        "MYCODE_SEED_RESPONSIBILITY_GUARD",
         "MYCODE_PLATEAU_REVIEW_OVERRIDE_ROUND",
     )
     return {

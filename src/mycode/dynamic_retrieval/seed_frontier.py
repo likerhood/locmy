@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
 from mycode.dynamic_retrieval.package_navigation import navigation_only_file
+from mycode.dynamic_retrieval.responsibility import responsibility_evidence
 
 
 def generated_source_counterpart(path, files):
@@ -77,10 +79,30 @@ def restore_seed_frontier(ranked, seeds, *, index, review, top_k, limit=2):
             item.reasons.append("retained_fast_seed_prior")
             chosen.append(item)
     retained = {item.path for item in chosen}
-    ordered = chosen + [item for item in ranked if item.path not in retained]
+    guard_enabled = os.environ.get("MYCODE_SEED_RESPONSIBILITY_GUARD", "1").lower() not in {
+        "0", "false", "no", "off",
+    }
+    # Preserve already-grounded front-rank owners before adding entry priors.
+    # This uses review evidence only, never benchmark labels or file names.
+    protected = [
+        item for item in ranked[:6]
+        if guard_enabled
+        and index.files.get(item.path, "").strip()
+        and _path_role(item.path) not in _CLOSURE_BLOCKED_ROLES
+        and not generated_source_counterpart(item.path, index.files)
+        and responsibility_evidence(decisions.get(item.path, {}))["supported"]
+    ]
+    protected_paths = {item.path for item in protected}
+    ordered = (
+        protected
+        + [item for item in chosen if item.path not in protected_paths]
+        + [item for item in ranked if item.path not in retained | protected_paths]
+    )
     return ordered[:top_k], {
         "strategy": "bounded_seed_prior_then_dynamic_recall",
         "retained": [item.path for item in chosen],
         "rejected": rejected,
         "limit": limit,
+        "responsibility_guard_enabled": guard_enabled,
+        "protected_responsibility_paths": [item.path for item in protected],
     }

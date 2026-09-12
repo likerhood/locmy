@@ -1392,6 +1392,7 @@ def test_precision_rerank_promotes_grounded_mechanism_over_generic_rank_one() ->
                     "entity_supported": True,
                     "mechanism_verified": True,
                     "patch_mechanism": "The ownership handler does not dispatch the transfer.",
+                    "direct_flow_supported": True,
                 },
                 {
                     "path": "src/state/selectors.js",
@@ -1486,6 +1487,7 @@ def test_precision_rerank_accepts_quote_entity_and_direct_flow_as_equivalent_mec
                     "supported_entities": ["dispatch_update"],
                     "direct_flow_supported": True,
                     "mechanism_verified": False,
+                    "patch_mechanism": "The handler forwards the old value to dispatch_update instead of the new value.",
                 }
             ]
         },

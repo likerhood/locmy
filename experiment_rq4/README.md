@@ -80,6 +80,8 @@ python3 scripts/verify_bundle.py
 - Omni 最新结果尚未齐备，本包不宣称能完成两个数据集的正式实验。
 - 更新定位输入或模型后使用新 run-id，不混用旧结果。
 
+若源码 Git 镜像和 GitHub 克隆都很慢或失败，但同一题的官方评测镜像已本地缓存，可在**流水线停止后**运行 `python3 scripts/cache_repo_from_image.py --run-id <run-id> --instance-id <instance-id>`。该工具只从此批次锁定摘要的镜像 `/testbed/.git` 导入 Git 对象，核验历史 `base_commit` 和至少一个定位候选文件后，原子地建立 `repos/<owner>__<name>/`，并记录 `.rq4-source.json` 来源。不会复制镜像当前工作树、gold 补丁或测试结果。成功后重复相同流水线命令即可复用既有 no-op/gold 报告；若镜像缺少所需 Git 对象，工具会停止且不建立缓存。
+
 输出：`runs/batches/<run-id>/`，含补丁、逐例记录、官方报告（如已测试）、`analysis.md`、`analysis.json`、`per_instance.csv`。缺少官方判定时保留 unknown，不能把补丁可应用当成解决。
 
 完整执行和分析命令见[一键运行与结果分析](一键运行与结果分析.md)。历史本地试跑见[运行环境与首次修复记录](运行环境与首次修复记录.md)，不代表当前 MiMo 或官方评测已跑通。

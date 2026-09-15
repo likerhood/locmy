@@ -12,6 +12,7 @@ import subprocess
 import sys
 import threading
 import time
+from progress_view import snapshot, render
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -24,7 +25,7 @@ def supervise(command, directory, interval=30):
         except BlockingIOError:
             raise SystemExit('This run already has a pipeline supervisor; inspect its pipeline.log')
         with (directory/'pipeline.log').open('a', buffering=1) as log:
-            mutex = threading.Lock()
+            mutex = threading.RLock()
             def emit(text):
                 with mutex:
                     log.write(text)
@@ -48,6 +49,8 @@ def supervise(command, directory, interval=30):
                 data = dict(state=state, supervisor_pid=os.getpid(), child_pid=process.pid if process else None,
                             updated_at=datetime.now().astimezone().isoformat(), elapsed_seconds=round(time.monotonic()-start),
                             exit_code=code, log=str(directory/'pipeline.log'))
+                if process is not None:
+                    data['progress'] = snapshot(ROOT, directory, process.pid)
                 tmp = directory/'status.json.tmp'
                 tmp.write_text(json.dumps(data, indent=2)+'\n')
                 tmp.replace(directory/'status.json')
@@ -68,7 +71,8 @@ def supervise(command, directory, interval=30):
                         code = process.wait(timeout=interval)
                         break
                     except subprocess.TimeoutExpired:
-                        emit(f'[heartbeat] Child PID={process.pid} alive; elapsed={int(time.monotonic()-start)}s. Alive does not prove progress.\n')
+                        emit(f'[heartbeat] 总耗时={int(time.monotonic()-start)}秒；进程存活不代表测试通过。\n')
+                        emit(render(snapshot(ROOT, directory, process.pid)))
                 reader.join(timeout=5)
                 state = 'interrupted' if stop else 'completed' if code == 0 else 'failed'
                 code = 128+stop[0] if stop else code

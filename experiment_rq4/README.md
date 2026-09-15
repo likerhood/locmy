@@ -154,3 +154,25 @@ python3 scripts/prepare_harness_dataset.py
 
 本次样本/测试协议改变，必须使用新 run-id，例如 `swe50v2-mimo-smoke-v1`。
 不要覆盖原批次结果；即使只跑一个样本，输入文件哈希也已改变。
+
+### 直观进度显示
+
+新版流水线每 30 秒显示当前阶段、活动子进程 PID、当前样本及方法/对照、已完成样本数。
+官方测试阶段自动读取当前样本的 harness/test 日志末尾两行，并显示距上次写入的秒数。
+下载阶段显示 image_pull.log，安装阶段显示 pip.log。补丁生成阶段不回显模型响应。
+详细信息同时写入 pipeline.log 和 status.json 的 progress 字段。
+进度通过 Linux /proc 子进程树只读识别，不修改修复/评测脚本或实验 manifest 哈希。
+“官方测试”表示评测进程存在，具体是在启动容器还是运行测试要结合下方日志判断；
+完成样本数以 completed_samples 标记为准，不把 0/1 进度解释成通过率。
+
+旧版已运行的任务无需中断：更新后在另一个终端执行以下命令也能查看当前步骤：
+
+```bash
+python3 scripts/progress_view.py --run-id swe50v2-mimo-smoke-v1
+# 持续刷新（Ctrl+C 只停止查看）
+watch -n 5 python3 scripts/progress_view.py --run-id swe50v2-mimo-smoke-v1
+```
+
+新启动的 server_pipeline.sh 自动显示这些内容，命令参数不变。
+旧任务的终端不会热更新，使用独立查看命令即可。若服务器重启或进程被强杀，
+旧 status.json 可能残留 running，应结合更新时间与 PID 判断。

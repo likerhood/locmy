@@ -3,10 +3,10 @@
 import argparse
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 from preflight import load_env
+from storage_check import check_storage
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -28,9 +28,12 @@ def main():
         raise SystemExit('Invalid disk reserve')
     os.environ['RQ4_MIN_FREE_GB'] = str(minimum)
     docker_root = subprocess.check_output(['docker','info','--format','{{.DockerRootDir}}'],text=True).strip()
-    for path in [ROOT,Path(docker_root)]:
-        if not path.is_dir() or shutil.disk_usage(path).free < minimum*1024**3:
-            raise SystemExit('Storage unavailable or below reserve before setup')
+    if not docker_root:
+        raise SystemExit('Docker returned an empty storage directory')
+    paths = [ROOT,Path(docker_root)]
+    if Path('/var/lib/containerd').is_dir():
+        paths.append(Path('/var/lib/containerd'))
+    check_storage(paths,minimum)
     subprocess.run(['bash',str(ROOT/'scripts/server_setup.sh'),'--env-file',str(args.env_file.resolve())],check=True)
     command = ['bash',str(ROOT/'scripts/install_harness.sh'),'--env-file',str(args.env_file.resolve())]
     if args.eval_dataset:

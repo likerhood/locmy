@@ -40,8 +40,10 @@ class Resources:
             info = self.client.info()
             self.daemon_id = info['ID']
             location = Path(info['DockerRootDir'])
-            if not location.is_dir():
-                raise Paused('DockerRootDir is not visible locally; cannot verify disk space')
+            from storage_check import inspect_storage
+            probe = inspect_storage(location, 0)
+            if probe['status'] != 'ok':
+                raise Paused(f'Docker storage {location}: {probe["status"]}; run scripts/storage_check.py')
             self.paths.append(location)
             # containerd may store unpacked/content data outside DockerRootDir.
             if Path('/var/lib/containerd').is_dir():
@@ -84,7 +86,8 @@ class Resources:
                 if min(free.values()) >= self.minimum:
                     break
         if min(free.values()) < self.minimum:
-            raise Paused('Free space below reserve; free disk or lower --min-free-gb deliberately')
+            details = '; '.join(f'{p}: {n/1024**3:.2f} GiB free' for p,n in free.items())
+            raise Paused(f'Free space below {self.minimum/1024**3:.2f} GiB reserve: {details}')
         return free
 
     def run(self, command, *, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=None, timeout=600):

@@ -1,0 +1,10 @@
+{
+  "path": "data/evaluation_seed/swe50.harness.jsonl.gz",
+  "sha256": "4e2361c211a57bb76a1cf7a671425c91b86890d58f4d5d24f82eb6edcb076ebf",
+  "uncompressed_sha256": "fa7862bbc886e7a7598f65032d50ec56381e9e87db181bcea2f3c025c094f683",
+  "count": 50,
+  "dataset": "SWE-bench/SWE-bench_Multimodal",
+  "revision": "4e6662d51c48e475f7f346e4fa09a6f8b31fcaa5",
+  "split": "dev",
+  "upstream_parquet_sha256": "714f4b815680608168d620c87c6b3420b3d4690d6656fc85b1da6511bfb55931"
+}

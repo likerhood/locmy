@@ -19,7 +19,7 @@
 {"instance_id": "chartjs__Chart.js-9871", "found_files": ["src/core/core.interaction.js", "src/controllers/controller.polarArea.js", "src/elements/element.arc.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9199", "found_files": ["src/plugins/plugin.legend.js", "src/helpers/helpers.rtl.js", "src/helpers/helpers.canvas.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9399", "found_files": ["src/controllers/controller.bar.js", "src/elements/element.bar.js", "src/scales/scale.category.js"], "status": "available"}
-{"instance_id": "chartjs__Chart.js-8650", "found_files": ["src/core/core.scale.js", "src/controllers/controller.line.js", "src/core/core.controller.js"], "status": "available"}
+{"instance_id": "chartjs__Chart.js-10806", "found_files": ["src/elements/element.arc.ts", "src/controllers/controller.doughnut.js", "src/controllers/controller.pie.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-8162", "found_files": ["src/plugins/plugin.legend.js", "src/plugins/plugin.title.js", "src/controllers/controller.pie.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9027", "found_files": ["src/core/core.layouts.js", "src/helpers/helpers.segment.js", "src/helpers/helpers.intl.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9764", "found_files": ["src/core/core.datasetController.js", "src/controllers/controller.bubble.js", "src/elements/element.point.js"], "status": "available"}

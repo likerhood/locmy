@@ -129,3 +129,28 @@ Ctrl+C 或给 supervisor 发 SIGTERM 会请求停止该流水线的进程组，�
 此日志功能不是后台运行工具，长任务仍建议使用 tmux。
 实验结果继续位于 `runs/batches/<run-id>/analysis.md` 等原有文件中。
 本次只改流水线包装与输出，不改变已有实验 manifest 的修复代码哈希。
+
+### SWE 50 样本修订 v2（2026-09-15）
+
+官方锁定 dev 数据缺少 `chartjs__Chart.js-8650`，现替换为同仓库的
+`chartjs__Chart.js-10806`：选择原 candidate_order 中第一个未选、官方存在且五种定位齐全的候选，
+没有参考补丁修复结果。五种 normalized 输入、CSV 清单和评测 seed 同步更新。
+此外，`diegomura__react-pdf-1552` 的历史 FAIL_TO_PASS 比官方多一个测试文件；
+现采用锁定官方版本的列表，历史值及理由保存在 `reports/sample_replacement_20260915.json`。
+标准补丁、测试补丁、base_commit 未被修改；原有 49 条定位输入不变。
+
+`configs/official_snapshot.json` 记录上游 parquet 及打包记录的 SHA256 和 revision。
+`prepare_harness_dataset.py` 优先加载打包的官方 50 条记录，验证哈希并逐项核对本地 seed，
+无需联网 Hugging Face；不跳过后续无补丁/标准补丁环境对照。
+restore 脚本仅对已知旧 seed 哈希自动备份迁移，未知内容拒绝覆盖。
+
+更新后先运行：
+
+```bash
+python3 scripts/verify_bundle.py
+python3 scripts/restore_eval_data.py
+python3 scripts/prepare_harness_dataset.py
+```
+
+本次样本/测试协议改变，必须使用新 run-id，例如 `swe50v2-mimo-smoke-v1`。
+不要覆盖原批次结果；即使只跑一个样本，输入文件哈希也已改变。

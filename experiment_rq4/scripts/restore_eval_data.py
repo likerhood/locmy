@@ -37,7 +37,14 @@ def main():
         args.output_dir.mkdir(parents=True, exist_ok=True)
         target = args.output_dir / f'{tag}50.jsonl'
         if target.exists() and target.read_text() != output:
-            raise SystemExit(f'{target}: existing content differs; refusing overwrite')
+            previous = hashlib.sha256(target.read_bytes()).hexdigest()
+            if previous not in spec.get('superseded_uncompressed_sha256', []):
+                raise SystemExit(f'{target}: existing content differs; refusing overwrite')
+            backup = target.with_name(target.name + '.superseded-' + previous[:12])
+            if backup.exists() and backup.read_bytes() != target.read_bytes():
+                raise SystemExit('Migration backup conflict')
+            backup.write_bytes(target.read_bytes())
+            print(f'Archived recognized previous selection: {backup}')
         target.write_text(output)
         print(f'{tag}: restored 50 evaluation-only records')
 

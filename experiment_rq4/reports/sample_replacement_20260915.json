@@ -1,0 +1,30 @@
+{
+  "removed": "chartjs__Chart.js-8650",
+  "added": "chartjs__Chart.js-10806",
+  "rule": "First unselected same-repository candidate in existing candidate order with pinned official metadata and all five localization outputs; no repair outcomes used",
+  "unchanged_samples": 49,
+  "official_field_adjustments": [
+    {
+      "instance_id": "diegomura__react-pdf-1552",
+      "field": "FAIL_TO_PASS",
+      "historical": [
+        "packages/layout/tests/fullPageView.test.js",
+        "packages/layout/tests/steps/resolveTextLayout.test.js"
+      ],
+      "official": [
+        "packages/layout/tests/steps/resolveTextLayout.test.js"
+      ]
+    }
+  ],
+  "verified_fields": [
+    "repo",
+    "base_commit",
+    "patch",
+    "test_patch",
+    "FAIL_TO_PASS",
+    "PASS_TO_PASS"
+  ],
+  "verified_count": 50,
+  "environment_controls": "not_run",
+  "selection_revision": "swe50-v2-20260915"
+}

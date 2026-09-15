@@ -1,9 +1,12 @@
 {
   "swe": {
     "path": "data/evaluation_seed/swe50.jsonl.gz",
-    "sha256": "48ea2352acd2e78a789745507c2355783ce0f6a79d53a03bc66a9948f30b386a",
-    "uncompressed_sha256": "8f1beb08e904101403a1e82ba843a8dfa9ba8e6956f0b310fcfb2a56d3921397",
-    "count": 50
+    "sha256": "1074d00c2c1eeddbe33233c89116849ef0bffa8c2c430855f3e338caeaa6e539",
+    "uncompressed_sha256": "ed681a868aa1a1036ecbe036c143b01d60175fec79039789e1393ff497db021c",
+    "count": 50,
+    "superseded_uncompressed_sha256": [
+      "8f1beb08e904101403a1e82ba843a8dfa9ba8e6956f0b310fcfb2a56d3921397"
+    ]
   },
   "omni": {
     "path": "data/evaluation_seed/omni50.jsonl.gz",

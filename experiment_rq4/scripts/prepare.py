@@ -58,6 +58,15 @@ def main():
         source = PROJECT / 'data' / filename
         all_rows = {r['instance_id']: r for r in map(json.loads, source.open())}
         rows = [all_rows[i] for i in ids]
+        # Explicitly audited historical test-list correction for the frozen official evaluator.
+        if tag == 'swe':
+            corrections = json.loads((ROOT/'reports/sample_replacement_20260915.json').read_text())['official_field_adjustments']
+            for correction in corrections:
+                row = all_rows[correction['instance_id']]
+                current = json.loads(row[correction['field']]) if isinstance(row[correction['field']], str) else row[correction['field']]
+                if current != correction['historical']:
+                    raise ValueError('Historical source changed; re-audit evaluator correction')
+                row[correction['field']] = json.dumps(correction['official'])
         # Full benchmark records exist only on the evaluation side.
         write_rows(ROOT / 'data/evaluation_only' / f'{tag}50.jsonl', rows)
         inputs = [{k: r[k] for k in ['instance_id', 'repo', 'base_commit', 'problem_statement']} for r in rows]

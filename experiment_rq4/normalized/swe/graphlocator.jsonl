@@ -19,7 +19,7 @@
 {"instance_id": "chartjs__Chart.js-9871", "found_files": ["src/elements/element.arc.js", "src/core/core.interaction.js", "src/controllers/controller.polarArea.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9199", "found_files": ["src/plugins/plugin.legend.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9399", "found_files": ["src/controllers/controller.bar.js"], "status": "available"}
-{"instance_id": "chartjs__Chart.js-8650", "found_files": ["src/controllers/controller.line.js", "src/elements/element.line.js", "test/fixtures/controller.bubble/clip.js"], "status": "available"}
+{"instance_id": "chartjs__Chart.js-10806", "found_files": ["src/elements/element.arc.ts", "src/controllers/controller.doughnut.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-8162", "found_files": ["src/core/core.layouts.js", "src/plugins/plugin.legend.js", "src/plugins/plugin.title.js", "src/core/core.controller.js", "src/core/core.animator.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9027", "found_files": ["src/helpers/helpers.segment.js"], "status": "available"}
 {"instance_id": "chartjs__Chart.js-9764", "found_files": ["src/elements/element.point.js"], "status": "available"}

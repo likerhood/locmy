@@ -5,6 +5,8 @@ Downloads official dataset to evaluation side only. Never supplies it to repair.
 """
 import json
 import ast
+import gzip
+import hashlib
 from pathlib import Path
 from run_batch import validate_eval
 
@@ -12,9 +14,25 @@ ROOT=Path(__file__).resolve().parents[1]
 
 
 def main():
-    from datasets import load_dataset
     config=json.loads((ROOT/'configs/harness_lock.json').read_text())
-    dataset=load_dataset(config['dataset'],split='dev',revision=config['dataset_revision'])
+    snapshot = ROOT/'configs/official_snapshot.json'
+    if snapshot.exists():
+        spec = json.loads(snapshot.read_text())
+        if spec['revision'] != config['dataset_revision'] or spec['dataset'] != config['dataset']:
+            raise SystemExit('Bundled official snapshot differs from harness lock')
+        packed = (ROOT/spec['path']).read_bytes()
+        if hashlib.sha256(packed).hexdigest() != spec['sha256']:
+            raise SystemExit('Official snapshot hash mismatch')
+        raw = gzip.decompress(packed)
+        if hashlib.sha256(raw).hexdigest() != spec['uncompressed_sha256']:
+            raise SystemExit('Official snapshot content hash mismatch')
+        dataset = [json.loads(x) for x in raw.decode().splitlines()]
+        if len(dataset) != spec['count'] or len({r['instance_id'] for r in dataset}) != len(dataset):
+            raise SystemExit('Invalid official snapshot count/duplicate IDs')
+        print('Using verified bundled official evaluator snapshot; no Hugging Face download', flush=True)
+    else:
+        from datasets import load_dataset
+        dataset=load_dataset(config['dataset'],split='dev',revision=config['dataset_revision'])
     public={r['instance_id']:r for r in dataset}
     local=[json.loads(x) for x in (ROOT/'data/evaluation_only/swe50.jsonl').read_text().splitlines()]
     selected=[]

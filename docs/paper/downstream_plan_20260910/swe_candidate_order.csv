@@ -35,7 +35,7 @@ swe,Automattic__wp-calypso-26286,Automattic/wp-calypso,e9d12f1585da7f7bd4ee03f47
 swe,chartjs__Chart.js-9871,chartjs/Chart.js,6bc47d3cea5ac0f496dc1b6bd53ed2fa5e1446d1,3.6,JavaScript/TypeScript,True,1,12,True,not_run,not_run
 swe,chartjs__Chart.js-9199,chartjs/Chart.js,599e23abfd1bb3545e350d62647f19911125872b,3.3,JavaScript/TypeScript,True,2,12,True,not_run,not_run
 swe,chartjs__Chart.js-9399,chartjs/Chart.js,31be6100015fbca3b639bcd63f9d03b52f21e171,3.4,JavaScript/TypeScript,True,3,12,True,not_run,not_run
-swe,chartjs__Chart.js-8650,chartjs/Chart.js,420aa027b305c91380d96d05e39db2767ec1333a,3.0,JavaScript/TypeScript,True,4,12,True,not_run,not_run
+swe,chartjs__Chart.js-8650,chartjs/Chart.js,420aa027b305c91380d96d05e39db2767ec1333a,3.0,JavaScript/TypeScript,True,4,12,False,not_run,not_run
 swe,chartjs__Chart.js-8162,chartjs/Chart.js,e3953acf1edb80c3e99c53ea22634304f3c31afa,3.0,JavaScript/TypeScript,True,5,12,True,not_run,not_run
 swe,chartjs__Chart.js-9027,chartjs/Chart.js,e021a77214daecbca0502da9d4245acbc2c46a1e,3.2,JavaScript/TypeScript,True,6,12,True,not_run,not_run
 swe,chartjs__Chart.js-9764,chartjs/Chart.js,12c5f9a8396f2a472f331ef772d6c7ba5cd62513,3.5,JavaScript/TypeScript,True,7,12,True,not_run,not_run
@@ -44,7 +44,7 @@ swe,chartjs__Chart.js-9766,chartjs/Chart.js,12c5f9a8396f2a472f331ef772d6c7ba5cd6
 swe,chartjs__Chart.js-9101,chartjs/Chart.js,927f24a809834100c138dc70cffd9e9b920478a5,3.2,JavaScript/TypeScript,True,10,12,True,not_run,not_run
 swe,chartjs__Chart.js-8868,chartjs/Chart.js,ba84cc5c2aaf500739b202702fac24da74ede50d,3.0,JavaScript/TypeScript,True,11,12,True,not_run,not_run
 swe,chartjs__Chart.js-10157,chartjs/Chart.js,c80b1450f55189a03bf3781e04559eb9b68f2129,3.7,JavaScript/TypeScript,True,12,12,True,not_run,not_run
-swe,chartjs__Chart.js-10806,chartjs/Chart.js,c35d0c6e48ece06b2f420e3804c5f7267820d129,4.0,JavaScript/TypeScript,True,13,12,False,not_run,not_run
+swe,chartjs__Chart.js-10806,chartjs/Chart.js,c35d0c6e48ece06b2f420e3804c5f7267820d129,4.0,JavaScript/TypeScript,True,13,12,True,not_run,not_run
 swe,chartjs__Chart.js-9613,chartjs/Chart.js,8d68b119bcb95af182cc69d42acad8490af53d3e,3.5,JavaScript/TypeScript,True,14,12,False,not_run,not_run
 swe,chartjs__Chart.js-8710,chartjs/Chart.js,bbf298f4614c058e2ec86329566a56bfcd8bc685,3.0,JavaScript/TypeScript,True,15,12,False,not_run,not_run
 swe,chartjs__Chart.js-8593,chartjs/Chart.js,275fdaf3dad77908053e4598a52093f671dc7b9e,3.0,JavaScript/TypeScript,True,16,12,False,not_run,not_run

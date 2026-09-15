@@ -24,7 +24,7 @@
       "field": "found_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "03e84103bda02d3007c09adff64d96bb1afadf676e8dff028d555e5826136503",
+      "normalized_sha256": "ca13b4a47f07616b021c93e365b46d58fa55dad2c32cfcf6406a1c03082a03c9",
       "model_identity": "directory/run label; provider identity audit pending"
     },
     {
@@ -36,7 +36,7 @@
       "field": "found_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "b8550f4a8e681950555a27433b03db07d97bd469c957f3f79965986f6d4f52d8",
+      "normalized_sha256": "3438872aa6ce8c2fea63ae129703332aa8de86f72635c7b7c4eb1a8930f96663",
       "model_identity": "directory/run label; provider identity audit pending"
     },
     {
@@ -48,7 +48,7 @@
       "field": "final_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "0611fc98588a661da1e48dd85522521e3637410098e6efc09ef913e3f792e72e",
+      "normalized_sha256": "cb97707acc61b74df5d5ae166b485007fb333e59ea71d23d3234a01eec9ca30d",
       "model_identity": "directory/run label; provider identity audit pending"
     },
     {
@@ -60,7 +60,7 @@
       "field": "found_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "93f81b19b6c072e7f8f59f9192b16ff8af99568adfd951247904482ca52d9a8b",
+      "normalized_sha256": "c3b13c17109b35c14fc0ac3f76287deeaaa251fee50cadaa95d9def98e23e0bc",
       "model_identity": "directory/run label; provider identity audit pending"
     },
     {
@@ -72,7 +72,7 @@
       "field": "ranked.files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "8c98f7504c2011bd88e4b6e4e66ca65ab058697f3edcb730c37171035c710c0f",
+      "normalized_sha256": "675debf2f00f207197dc2f6bb184e1b16bf8a3755fe459ad39027c777eb513c8",
       "model_identity": "runtime API id xopqwen35397b; provider identity not independently verified"
     },
     {
@@ -107,5 +107,6 @@
       "normalized_sha256": "d38a429cadcca1011354f878a509c8eb42edd22f7009504ec5f00f8db77dafc9",
       "model_identity": "directory_label; provider identity audit pending"
     }
-  ]
+  ],
+  "selection_revision": "swe50-v2-20260915"
 }

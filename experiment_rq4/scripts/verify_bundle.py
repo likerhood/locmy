@@ -33,6 +33,12 @@ def main():
         inputs = [json.loads(x) for x in (ROOT / 'data/inputs' / f'{tag}50.jsonl').read_text().splitlines()]
         expected = [{k: r[k] for k in ['instance_id', 'repo', 'base_commit', 'problem_statement']} for r in rows]
         require(inputs == expected, f'{tag}: repair inputs differ from bundled records')
+    official = json.loads((ROOT/'configs/official_snapshot.json').read_text())
+    packed = (ROOT/official['path']).read_bytes()
+    require(hashlib.sha256(packed).hexdigest() == official['sha256'], 'Official snapshot hash mismatch')
+    raw = gzip.decompress(packed)
+    require(hashlib.sha256(raw).hexdigest() == official['uncompressed_sha256'], 'Official raw snapshot hash mismatch')
+    require([json.loads(x)['instance_id'] for x in raw.decode().splitlines()] == ids_by_tag['swe'], 'Official snapshot IDs/order mismatch')
     exported = []
     missing = []
     for item in audit['predictions']:

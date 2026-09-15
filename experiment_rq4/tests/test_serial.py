@@ -97,7 +97,7 @@ class SerialTests(unittest.TestCase):
             root=Path(tmp);env=root/'mimo.env'
             env.write_text('RQ4_MODEL=mimo-test\nRQ4_API_KEY=test\nRQ4_BASE_URL=https://example.invalid/v1\n')
             args=['pipeline','--env-file',str(env),'--eval-dataset',str(root/'eval.jsonl')]
-            with patch.object(pipeline,'ROOT',root),patch.dict(os.environ,{},clear=True),patch.object(sys,'argv',args),patch.object(pipeline.subprocess,'check_output',return_value=str(root)),patch.object(pipeline.subprocess,'run') as run,patch.object(pipeline.os,'execv') as execute:
+            with patch.object(pipeline,'ROOT',root),patch.dict(os.environ,{},clear=True),patch.object(sys,'argv',args),patch.object(pipeline,'docker_info',return_value={'DockerRootDir':str(root),'Driver':'overlay2'}),patch.object(pipeline.subprocess,'run') as run,patch.object(pipeline.os,'execv') as execute:
                 pipeline.main()
                 self.assertEqual(os.environ['RQ4_MODEL'],'mimo-test')
                 self.assertIn(str(env),run.call_args_list[0].args[0])

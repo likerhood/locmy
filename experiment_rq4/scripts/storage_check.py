@@ -2,6 +2,7 @@
 """Report each actual filesystem; never equate inaccessible paths with low space."""
 import argparse
 import json
+import os
 from pathlib import Path
 import shutil
 import stat
@@ -37,18 +38,44 @@ def check_storage(paths, minimum):
         raise SystemExit('Storage preflight stopped: ' + details)
 
 
+def docker_storage_paths(info):
+    """Graph drivers use this daemon's root; snapshotters require an explicit data path."""
+    root = info.get('DockerRootDir', '')
+    if not root or not Path(root).is_absolute() or not info.get('Driver'):
+        raise ValueError('Docker did not report a valid absolute data root and driver')
+    paths = [Path(root)]
+    status = json.dumps(info.get('DriverStatus', []))
+    if 'io.containerd.snapshotter' in status:
+        extra = os.getenv('RQ4_CONTAINERD_DATA_ROOT', '').strip()
+        if not extra or not Path(extra).is_absolute():
+            raise ValueError('Containerd image store detected: set RQ4_CONTAINERD_DATA_ROOT to its verified absolute data path')
+        paths.append(Path(extra))
+    return list(dict.fromkeys(paths))
+
+
+def docker_info():
+    # Python Docker SDK does not resolve CLI contexts. Require the same endpoint for both.
+    if os.getenv('DOCKER_CONTEXT') not in (None, '', 'default'):
+        raise ValueError('Unset DOCKER_CONTEXT and select the daemon with DOCKER_HOST for both CLI and Python')
+    host = os.getenv('DOCKER_HOST', '')
+    if host and not host.startswith('unix:///'):
+        raise ValueError('RQ4 storage monitoring requires a local unix:// Docker endpoint')
+    # Pin child CLI processes too: their saved context may differ from SDK defaults.
+    host = host or 'unix:///var/run/docker.sock'
+    os.environ['DOCKER_HOST'] = host
+    os.environ.pop('DOCKER_CONTEXT', None)
+    command = ['docker', '--host', host]
+    raw = subprocess.check_output(command + ['info','--format','{{json .}}'], text=True, timeout=30)
+    return json.loads(raw)
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--min-free-gb',type=float,default=10)
     args=p.parse_args()
     if not 0 < args.min_free_gb < float('inf'):
         p.error('Reserve must be positive and finite')
-    result=subprocess.run(['docker','info','--format','{{.DockerRootDir}}'],capture_output=True,text=True)
-    if result.returncode or not result.stdout.strip():
-        raise SystemExit('Cannot obtain DockerRootDir; run docker info to inspect daemon availability')
-    paths=[Path(__file__).resolve().parents[1],Path(result.stdout.strip())]
-    if Path('/var/lib/containerd').is_dir():
-        paths.append(Path('/var/lib/containerd'))
+    paths = [Path(__file__).resolve().parents[1], *docker_storage_paths(docker_info())]
     check_storage(paths,args.min_free_gb)
 
 

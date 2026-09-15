@@ -39,15 +39,15 @@ class Resources:
                 raise Paused('Only a local Docker daemon is supported for disk monitoring')
             info = self.client.info()
             self.daemon_id = info['ID']
-            location = Path(info['DockerRootDir'])
-            from storage_check import inspect_storage
-            probe = inspect_storage(location, 0)
-            if probe['status'] != 'ok':
-                raise Paused(f'Docker storage {location}: {probe["status"]}; run scripts/storage_check.py')
-            self.paths.append(location)
-            # containerd may store unpacked/content data outside DockerRootDir.
-            if Path('/var/lib/containerd').is_dir():
-                self.paths.append(Path('/var/lib/containerd'))
+            from storage_check import inspect_storage, docker_storage_paths, docker_info
+            # Ensure CLI pull/cleanup and SDK grading reach the identical daemon.
+            if docker_info().get('ID') != self.daemon_id:
+                raise Paused('Docker CLI and SDK target different daemons; set DOCKER_HOST explicitly')
+            for location in docker_storage_paths(info):
+                probe = inspect_storage(location, 0)
+                if probe['status'] != 'ok':
+                    raise Paused(f'Docker storage {location}: {probe["status"]}; run scripts/storage_check.py')
+                self.paths.append(location)
 
     def event(self, kind, **fields):
         self.batch.mkdir(parents=True, exist_ok=True)

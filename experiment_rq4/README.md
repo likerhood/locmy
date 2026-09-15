@@ -81,3 +81,26 @@ python3 scripts/verify_bundle.py
 输出：`runs/batches/<run-id>/`，含补丁、逐例记录、官方报告（如已测试）、`analysis.md`、`analysis.json`、`per_instance.csv`。缺少官方判定时保留 unknown，不能把补丁可应用当成解决。
 
 完整执行和分析命令见[一键运行与结果分析](一键运行与结果分析.md)。历史本地试跑见[运行环境与首次修复记录](运行环境与首次修复记录.md)，不代表当前 MiMo 或官方评测已跑通。
+
+### 独立 Docker 服务与存储检查
+
+共享服务器可使用独立 Rootless Docker，将其数据目录配置到 `/data2`。
+先完成该服务的安装与验证；仅设置下面的变量不会安装服务或迁移数据。
+启动 RQ4 前，在同一个终端指定实际 socket：
+
+```bash
+unset DOCKER_CONTEXT
+export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
+docker info --format 'Root={{.DockerRootDir}} Driver={{.Driver}} Security={{json .SecurityOptions}}'
+python3 scripts/storage_check.py --min-free-gb 10
+```
+
+确认 Root 位于自己的 `/data2` 目录、Security 包含 rootless，再运行 pipeline。
+`DOCKER_HOST` 也可放在 `--env-file` 指定的配置中；独立运行 storage_check.py 时需在 shell 中 export。
+RQ4 对齐 Docker CLI 与 Python SDK 的服务 ID，并将 socket 传给子进程。
+未设置 DOCKER_HOST 时明确使用 `/var/run/docker.sock`，不跟随 CLI 保存的 context。
+
+overlay2/fuse-overlayfs 检查所连接服务的 DockerRootDir，不再无条件检查系统
+`/var/lib/containerd`。如果检测到 containerd snapshotter，必须设置
+`RQ4_CONTAINERD_DATA_ROOT` 为管理员或服务配置确认的实际数据目录；不能为通过检查而填任意目录。
+这些设置不重启、不迁移系统 Docker，也不操作其他人的容器。

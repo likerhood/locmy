@@ -56,7 +56,7 @@ def main():
             report['predictions'][f'{dataset}/{method}'] = {
                 'rows': len(rows), 'available': sum(r['status'] == 'available' for r in rows)}
     report['formal_blockers'] = ['50+50 environment no-op/gold controls not executed',
-        'MAGNET SWE front_rank_v1 and Omni r4 are different versions; choose common frozen method',
+        'MAGNET SWE addtest3 and Omni r4 are different versions; choose common frozen method',
         'input compact evidence provenance and model identity require audit',
         'development repair uses byte budget; formal tokenizer-aware context policy not frozen']
     if not report['api_configured']:

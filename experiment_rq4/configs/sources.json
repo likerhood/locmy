@@ -1,7 +1,7 @@
 {
   "swe": {
     "locagent": {
-      "path": "LocAgent/newtest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/location/merged_loc_outputs_mrr.jsonl",
+      "path": "LocAgent/newtest/swebench_multimodal-clean15-92/results/locagent_swe92_qwen397_v2/location/merged_loc_outputs_mrr.jsonl",
       "field": "found_files"
     },
     "cosil": {
@@ -9,7 +9,7 @@
       "field": "found_files"
     },
     "gala": {
-      "path": "GALA/mytest/swebench_multimodal-full-dev/results/Qwen3.5-397B-A17B/loc_results.json",
+      "path": "GALA/mytest/swebench-multimodal-clean15-92/results/Qwen3.5-397B-A17B/loc_results.json",
       "field": "final_files"
     },
     "graphlocator": {
@@ -17,10 +17,10 @@
       "field": "found_files"
     },
     "magnet": {
-      "path": "alltry/mycode/result/swe_clean15_agent_Qwen3.5-397B-A17B_swe_clean15_front_rank_v1/agent_traces.jsonl",
+      "path": "alltry/mycode-addtest3/result/004swe_clean15_agent_Qwen3.5-397B-A17B_swe_clean15_addtest3_v1/agent_traces.jsonl",
       "field": "ranked.files",
       "item_key": "path",
-      "note": "trace_recorder._top_paths exports first15 ranked_locations in order; sufficient for Top5"
+      "note": "User-selected addtest3; runtime git 9cef95a2282ef74cffcd8f3e5b379db6460a3aa6, clean; API model xopqwen35397b; trace/final Top5 parity 92/92 checked 2026-09-15."
     }
   },
   "omni": {

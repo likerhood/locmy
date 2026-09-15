@@ -104,3 +104,28 @@ overlay2/fuse-overlayfs 检查所连接服务的 DockerRootDir，不再无条件
 `/var/lib/containerd`。如果检测到 containerd snapshotter，必须设置
 `RQ4_CONTAINERD_DATA_ROOT` 为管理员或服务配置确认的实际数据目录；不能为通过检查而填任意目录。
 这些设置不重启、不迁移系统 Docker，也不操作其他人的容器。
+
+### 流水线进度、日志与中断
+
+`server_pipeline.sh` 现在自动保存终端 stdout/stderr 到
+`runs/pipeline/<run-id>/pipeline.log`，同一 run-id 重启时追加日志。
+四个阶段分别是存储检查、基础准备、评测工具安装、修复与测试。
+每 30 秒显示子进程 PID 和耗时；心跳只表示进程存活，不证明下载或测试有进展。
+`runs/pipeline/<run-id>/status.json` 每 30 秒刷新，记录 running/stopping/completed/failed/interrupted。
+进程被 SIGKILL 或服务器断电时无法写最终状态，所以要结合更新时间及实际进程检查。
+
+```bash
+# 在 experiment_rq4 目录，用自己的 run-id 替换下面的值。
+tail -f runs/pipeline/swe-mimo-rootless-smoke-v1/pipeline.log
+cat runs/pipeline/swe-mimo-rootless-smoke-v1/status.json
+# 安装工具的详细输出仍在这里；主日志会提示这个路径。
+tail -f reports/setup/pip.log
+```
+
+Ctrl+C 或给 supervisor 发 SIGTERM 会请求停止该流水线的进程组，等待子程序清理后记录中断。
+不要用 kill -9 作为日常停止方法。看到 interrupted/failed 后先检查错误，恢复时使用相同参数和 run-id。
+已有 API 请求不自动重试，无法保证任何中断位置都能无人工处理恢复。
+同一 run-id 的 supervisor 不允许重复启动；实验缓存原有锁仍生效。
+此日志功能不是后台运行工具，长任务仍建议使用 tmux。
+实验结果继续位于 `runs/batches/<run-id>/analysis.md` 等原有文件中。
+本次只改流水线包装与输出，不改变已有实验 manifest 的修复代码哈希。

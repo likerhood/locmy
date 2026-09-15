@@ -1,87 +1,82 @@
-# RQ4 下游修复实验工作区
+# RQ4 下游实验：单目录部署
 
-**服务器运行入口：见 [一键运行与结果分析](一键运行与结果分析.md)。目标分支为 `rq4work`。** 已增加批量生成、断点记录、官方SWE环境对照/测试接口和逐例/配对分析；当前本机无Docker，完整官方评测仍需服务器验收。
+仓库：`git@github.com:likerhood/locmy.git`；分支：**rq4work**。只推送 mycode 对应的这个仓库即可。`experiment_rq4` 包含服务器所需的实验输入、脚本、环境模板和分析程序，不需要外层 locCode、其他 baseline 工程或 addtest3 工作区。
 
-更新：已复制 mycode/.env.local 并兼容其变量名，完成一次真实API补丁生成与隔离应用检查。电脑配置、实际耗时/token、运行命令及Docker后续步骤见 [运行环境与首次修复记录](运行环境与首次修复记录.md)。下文的未调用模型状态描述属于初次准备阶段，以本记录为准。
+## 已打包内容
 
-本目录按用户指定创建，使用既有 adapted baseline 的 Qwen3.5-397B-A17B 定位结果。不增加 Agentless-FL 定位实验，不把不同方法结果合并，也不重跑已经可复用的定位。
+| 路径 | 用途 |
+|---|---|
+| `normalized/swe/*.jsonl` | 五种方法各 50 例定位输出，供修复读取 |
+| `normalized/omni/magnet.jsonl` | 历史 Omni MAGNET 50 例；四个 baseline 尚缺 |
+| `data/inputs/*50.jsonl` | 修复任务输入，只有 ID、仓库、基础提交、问题描述 |
+| `data/evaluation_seed/*.jsonl.gz` | 隔离评测记录，含 gold；只供恢复评测数据，不进入修复提示词 |
+| `manifests/` | 固定 50 例名单和候补顺序 |
+| `configs/` | 协议、文件哈希和上游版本锁定 |
+| `scripts/` | 校验、初始化、修复、官方评测、结果分析 |
+| `.env.example` | API 配置模板；实际密钥不提交 |
+| `reports/source_audit_20260915.json` | 最新 SWE 导出的来源、旧新哈希和变化数量 |
 
-## 已准备的内容
+SWE MAGNET 已替换为用户指定的 addtest3（运行记录 git SHA 9cef95a，API 模型 ID xopqwen35397b）。LocAgent 使用本机 v2，GALA 使用 Clean15-92；CoSIL 和 GraphLocator 沿用本机尚未找到更新版本的 Qwen397 来源。原 50 例及顺序不变。详见[定位来源与分支操作](定位来源与分支操作_20260915.md)。
 
-- `vendor/Agentless/`：从 https://github.com/OpenAutoCoder/Agentless.git 克隆的官方上游源码；固定提交见 `configs/vendor_lock.json`。没有修改上游源码。
-- `snapshots/swe/`：四种 baseline 原始定位结果快照，可能包含 gold，仅供审计，不能传给修复模型。
-- `normalized/{swe,omni}/`：每方法各 50 条白名单定位输出，字段仅 instance_id/found_files/status。
-- `manifests/`：50 例候选清单以及按仓库排序的候补；尚未进行环境正负控，不能称正式冻结测试集。
-- `data/inputs/{swe,omni}50.jsonl`：只有 instance_id/repo/base_commit/problem_statement，修复程序只读取这里。
-- `data/evaluation_only/{swe,omni}50.jsonl`：完整50例，含 patch/test_patch/测试标签，隔离供评测。
-- `configs/sources.json`：每种方法的来源文件和预测字段；Omni 缺失的同模型 baseline 显式为 null。
-- `reports/preparation.json`：数据/预测来源 SHA-256、覆盖数、缺失项。
-- `reports/readiness.json`：当前预检状态，不会发 API 请求。
+`configs/sources.json` 记录原始来源路径，只供审计或维护者重新导出；服务器运行不访问这些路径。不要在服务器执行 `scripts/prepare.py`。大型原始轨迹和 baseline snapshots 不需要上传。
 
-MAGNET 从精简的 agent_traces.jsonl 提取 ranked.files 并记录来源 SHA，不复制大型原始结果。源码 trace_recorder 将最终 ranked_locations 前15项按原序导出到该字段；另按 instance_id 与每例 CSV 的 Top-5 交叉验证，结果见 reports/magnet_top5_parity.json。SWE 使用 front_rank_v1，Omni 使用历史 r4；两者不能直接作为同版本正式主表，暂作为开发素材。
-
-## 环境与命令
-
-所有命令从本目录执行：
+## 服务器从零开始
 
 ```bash
-cd /home/like/locCode/alltry/mycode/experiment_rq4
-bash scripts/setup.sh
-.venv/bin/python scripts/preflight.py
+git clone --depth 1 --branch rq4work --single-branch git@github.com:likerhood/locmy.git locmy-rq4
+cd locmy-rq4/experiment_rq4
+python3 scripts/verify_bundle.py
+bash scripts/server_setup.sh
+nano .env.local
+chmod 600 .env.local
 ```
 
-本次已创建独立 `.venv`。准备、预检、开发修复脚本仅使用 Python 标准库及 Git，无需安装整个 Agentless 依赖栈；这不代表官方 Agentless 或 SWE-bench harness 已安装可运行。上游依赖原样保留在 `vendor/Agentless/requirements.txt`，正式 harness 应另建并锁定其环境。
+初始化会校验输入、建立 Python venv、下载锁定版本 Agentless、从本目录压缩记录恢复 `data/evaluation_only/` 并预检；不收费。Python 需要 3.10+，建议 3.12；模型走 API，无需本地 GPU。Git、venv 支持和上游下载网络需服务器提供。输入完整不代表 Docker 和官方评测已可用。
 
-配置 `.env.local` 中 RQ4_BASE_URL（通常包含服务的 /v1 前缀）、RQ4_API_KEY、RQ4_MODEL。不要把整份既有 `.env.mimo1.local` 直接当成 Qwen 配置；确认实际修复模型后填写。脚本不打印密钥，不自动导入其他实验凭据，也不将密钥写入请求记录。
+`.env.local` 使用实际服务商支持的 MiMo 模型 ID：
 
-重新导出数据（会覆盖本目录生成的准备产物；不覆盖源结果）：
+```dotenv
+RQ4_BASE_URL=https://你的接口基础地址/v1
+RQ4_API_KEY=你的密钥
+RQ4_MODEL=实际MiMo模型ID
+RQ4_REQUEST_TIMEOUT=180
+```
+
+终端同名变量优先于文件；非空 RQ4_MODEL 优先于旧 MODEL_API_NAME。改变的是修复模型，Qwen 定位不重跑。
 
 ```bash
-.venv/bin/python scripts/prepare.py
+# 无收费请求
+bash scripts/server_run.sh --mode check --dataset swe
+
+# 一例 MAGNET addtest3 + MiMo，会收费；只生成和检查补丁，不运行官方测试
+bash scripts/server_run.sh --mode generate --dataset swe --methods magnet --limit 1 --run-id swe-addtest3-mimo-api-smoke-v1
 ```
 
-已改用约62MB的 Omni MAGNET精简轨迹，避免反复扫描19GB完整结果。将来补齐 Omni 同模型 baseline，只需更新 sources.json 为真实路径和字段再导出。不要把 Qwen3-VL-8B 结果改名成 Qwen3.5。
+目标项目源码由批量脚本按需下载到 `repos/`。因此“单目录部署”不表示完全离线：仍需模型服务、GitHub、评测数据和容器镜像网络。直接调用 `repair.py` 时必须提供 `--repo`，不再自动搜索外层 mycode/LocAgent 缓存。
 
-## 已验证的离线预演
+## 已有服务器仓库
+
+在 locmy 仓库根目录检查本地修改后：
 
 ```bash
-.venv/bin/python scripts/repair.py \
-  --dataset swe --method locagent \
-  --instance-id markedjs__marked-1535 \
-  --repo /home/like/locCode/LocAgent/repo_newtest_swebench_multimodal-full-dev/markedjs_marked
+git status --short
+git fetch origin
+git switch rq4work
+git pull --ff-only origin rq4work
+cd experiment_rq4
+python3 scripts/verify_bundle.py
 ```
 
-默认只读取指定 base_commit 源码并保存 request.json，不发模型请求、不修改仓库。即使该本地仓库当前 HEAD 不同，也使用 `git show base_commit:path` 获取冻结源码，不执行 checkout/reset，因此不会干扰定位任务。该实例属于候选清单，离线请求检查不用于调优修复成功率；后续若用它调 prompt，应从正式集合移出并按候补协议替换。
+本地没有分支时使用 `git switch --track origin/rq4work`。不要切 main 来运行 RQ4；不必切 addtest3。切换前保留已有改动，不使用强制覆盖。
 
-配置 API 后，给同一命令添加 `--execute` 才调用一次真实模型。输出在 `runs/<dataset>/<method>/<instance>/<unique-run>/`，包含 request.json、response.json（若有）、prediction.jsonl；没有自动多次尝试、测试反馈或挑选最佳结果。不要反复试同一个正式实例后仅保留成功记录。
+## 当前限制和结果
 
-**开发修复入口的准确定位：** 当前 scripts/repair.py 是独立编写的语言无关 JSON SEARCH/REPLACE smoke adapter，借鉴 Agentless 的编辑流程，没有调用官方 Agentless Python API。不能在论文中将它标成未修改的 Agentless-1.5。它可生成多文件 diff；目前拒绝新文件和超出上下文的编辑。正式协议中的新文件支持、tokenizer-aware 24k packing 尚待实现/验收。
+- 只有 50 GB 时，暂勿启动全量 Docker 流程：当前无磁盘限额及自动镜像回收，workers=1 只限制并发。
+- 完整评测仍需官方元数据兼容性、Docker 与 gold/no-op 对照验证；MiMo 接口需要实际试跑。
+- 修复器为 Agentless-inspired 独立编辑器，不是官方 Agentless-1.5 原样运行。协议为完整文件、72,000 UTF-8 字节上限、单补丁、无反馈迭代。
+- Omni 最新结果尚未齐备，本包不宣称能完成两个数据集的正式实验。
+- 更新定位输入或模型后使用新 run-id，不混用旧结果。
 
-开发版使用72,000 UTF-8字节的完整源码上限，不将其冒充24k token。遇到大文件直接明确停止，不偷偷截取文件开头。原始 issue 保持既有输入，SWE 三份 Compact 块的去重与证据来源仍需正式统一审计。没有宣称 input JSON 白名单能够排除问题文本内部所有潜在泄漏。
+输出：`runs/batches/<run-id>/`，含补丁、逐例记录、官方报告（如已测试）、`analysis.md`、`analysis.json`、`per_instance.csv`。缺少官方判定时保留 unknown，不能把补丁可应用当成解决。
 
-## 评测
-
-Agentless 是修复参考框架，官方解决率由 SWE-bench Multimodal / OmniGIRL 对应 harness 判定。当前环境 Docker WSL 接口不可用，独立环境也未安装 SWE-bench。不能仅凭生成 diff 或 `git apply` 成功宣称 resolved。
-
-先为最终候选跑通 no-op/gold controls、锁定数据 revision、镜像 digest 和测试超时，然后接入官方评测。评测程序输入字段通常为 instance_id/model_name_or_path/model_patch；开发输出额外字段只供审计，可白名单导出。
-
-已经得到官方逐实例 `report.json` 后，使用外层汇总维持50分母：
-
-```bash
-.venv/bin/python scripts/summarize.py \
-  --dataset swe \
-  --reports /absolute/path/to/one_method_one_attempt_reports \
-  --output reports/swe_locagent_eval.json
-```
-
-只传一种方法、一个候选轮次的目录，脚本遇到重复实例报告会拒绝，避免把多次尝试拼成 oracle 成绩。缺失报告单列，当前保守 resolved% 的分母仍是50，不把未完成评测说成完整结果。
-
-## 测试与当前限制
-
-```bash
-.venv/bin/python -m unittest discover -s tests -v
-```
-
-测试覆盖 gold 字段隔离、50唯一ID、非法路径、歧义替换，以及 JS/Java 多文件补丁实际 git apply 后内容与末尾换行保持。
-
-启动结论：SWE 已通过离线请求构建、一次真实API补丁生成和隔离应用检查。完整50+50正式实验尚缺 Omni 四个同模型 baseline、统一MAGNET版本、可用Docker与官方harness、正式上下文策略和环境正负控。尚未运行官方解决率测试，也未自动启动新一轮定位。
+完整执行和分析命令见[一键运行与结果分析](一键运行与结果分析.md)。历史本地试跑见[运行环境与首次修复记录](运行环境与首次修复记录.md)，不代表当前 MiMo 或官方评测已跑通。

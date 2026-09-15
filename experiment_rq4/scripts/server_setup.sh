@@ -2,6 +2,7 @@
 # Run from any directory after cloning the mycode repository on the server.
 set -euo pipefail
 RQ4_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 "$RQ4_ROOT/scripts/verify_bundle.py"
 bash "$RQ4_ROOT/scripts/setup.sh"
 mkdir -p "$RQ4_ROOT/vendor"
 if [[ ! -d "$RQ4_ROOT/vendor/Agentless" ]]; then

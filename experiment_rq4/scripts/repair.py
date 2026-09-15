@@ -80,12 +80,7 @@ def main():
         raise SystemExit('Missing or empty prediction')
     repo = args.repo
     if repo is None:
-        sys.path.insert(0, str(ROOT.parent / 'src'))
-        from mycode.repo_index.repo_locator import find_repo_root
-        dataset = 'swebench_multimodal-full-dev' if args.dataset == 'swe' else 'omnigirl-full-candidates'
-        repo = find_repo_root(sample['repo'], dataset, sample['base_commit'])
-    if repo is None:
-        raise SystemExit('Exact repository unavailable; provide --repo with base_commit objects')
+        raise SystemExit('Provide --repo with base_commit objects, or use server_run.sh to fetch the repository automatically')
     repo = repo.resolve()
     # No checkout/reset: git show reads the frozen commit even if another run uses this repo.
     subprocess.run(['git', '-C', str(repo), 'cat-file', '-e', sample['base_commit'] + '^{commit}'], check=True, capture_output=True)

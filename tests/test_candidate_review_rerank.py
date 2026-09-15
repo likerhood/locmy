@@ -1071,6 +1071,8 @@ def test_candidate_review_exact_entity_improves_function_grounding() -> None:
                     "role": "patch_target",
                     "confidence": 0.95,
                     "entities": [{"kind": "function", "name": "loadStrings"}],
+                    "quote_supported": True,
+                    "supported_entities": [{"kind": "function", "name": "loadStrings"}],
                 }
             ],
         }

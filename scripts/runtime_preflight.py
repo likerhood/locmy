@@ -123,6 +123,7 @@ def collect_runtime_capabilities() -> dict[str, Any]:
         "MYCODE_BROWSER_REQUIRED",
         "MYCODE_CROSS_ROUND_PROTECTED_PREFIX",
         "MYCODE_FINAL_SEED_PREFIX",
+        "MYCODE_REVIEW_BACKFILL_LIMIT",
         "MYCODE_HEAD_REPLACEMENT_MARGIN",
         "MYCODE_PLATEAU_REVIEW_OVERRIDE_ROUND",
     )

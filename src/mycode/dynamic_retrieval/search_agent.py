@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 import time
@@ -1392,6 +1393,40 @@ def _read_code_context(
     return contexts
 
 
+def _backfill_review_context(index, ranked, code_contexts, *, candidate_limit, context_limit, limit=2):
+    """Fill missing reviewer snippets using observed entity names, within existing budgets."""
+    contexts = list(code_contexts)
+    positions = {item["path"]: i for i, item in enumerate(contexts)}
+    diagnostics = {"attempted": [], "filled": []}
+    for item in ranked[:candidate_limit]:
+        if len(diagnostics["attempted"]) >= limit:
+            break
+        position = positions.get(item.path)
+        if position is not None and contexts[position].get("snippets"):
+            continue
+        if position is None and len(contexts) >= context_limit:
+            continue
+        if _path_role(item.path) in _CLOSURE_BLOCKED_ROLES:
+            continue
+        names = [str(entity.get("name") or "").split(".")[-1]
+                 for entity in item.entities[:8] if isinstance(entity, dict)]
+        names = [name for name in names if len(name) >= 3]
+        if not names:
+            continue
+        diagnostics["attempted"].append(item.path)
+        read = _read_code_context(index, [item], names, limit=1)
+        if not read or not read[0].get("snippets"):
+            continue
+        read[0]["context_origin"] = "review_entity_backfill"
+        if position is None:
+            positions[item.path] = len(contexts)
+            contexts.append(read[0])
+        else:
+            contexts[position] = read[0]
+        diagnostics["filled"].append(item.path)
+    return contexts, diagnostics
+
+
 def _path_concern_bonus(path: str, sample: NormalizedSample, evidence_result: Dict[str, Any]) -> tuple[float, list[str]]:
     lower = f"{path} {_issue_query_text(sample.issue_text)} {evidence_result.get('evidence_synthesis', {})}".lower()
     bonus = 0.0
@@ -1446,6 +1481,8 @@ def _path_role(path: str) -> str:
         return "generated_or_lockfile"
     if lower.startswith("lib/addons/"):
         return "addon_bundle"
+    if filename.endswith((".md", ".mdx", ".rst", ".adoc")):
+        return "reproduction_or_example"
     if filename.endswith((".d.ts", ".pyi")) or any(
         part in lower for part in ("/generated-sources/", "/generated_sources/")
     ):
@@ -1490,7 +1527,7 @@ def _issue_allows_non_source_targets(issue_text: str) -> bool:
     )
     if negative_non_source:
         return False
-    non_source_words = r"(test|tests|spec|fixture|fixtures|documentation|docs|example|demo|build|bundle|minified)"
+    non_source_words = r"(test|tests|spec|fixture|fixtures|documentation|docs|readme|changelog|release notes|blog|contributing|example|demo|build|bundle|minified)"
     edit_verbs = r"(fix|update|change|modify|add|remove|repair|correct|rewrite|document)"
     return bool(
         re.search(rf"\b{edit_verbs}\b[\w\s,;:()/.-]{{0,48}}\b{non_source_words}\b", lower)
@@ -3605,6 +3642,7 @@ def _apply_llm_candidate_review(
         "reproduction_only": -0.75,
         "test_or_docs": -0.68,
         "unlikely": -0.48,
+        "insufficient_evidence": 0.0,
     }
     reviewed_count = max(1, len(decisions))
     for item in ranked:
@@ -3627,7 +3665,7 @@ def _apply_llm_candidate_review(
             adjustment = min(cap, cap * raw_factor)
         else:
             adjustment = max(-max_penalty, max_penalty * raw_factor)
-        if counterevidence and not mechanism_verified:
+        if counterevidence and not mechanism_verified and role != "insufficient_evidence":
             adjustment -= min(max_penalty * 0.35, 6.0 * len(counterevidence))
         item.score += adjustment
         item.score_components["llm_candidate_review"] = round(adjustment, 3)
@@ -4084,6 +4122,7 @@ def _precision_rerank_locations(
             "reproduction_only": -7.0,
             "test_or_docs": -7.0,
             "unlikely": -5.0,
+            "insufficient_evidence": 0.0,
         }
         role_adjustment = role_adjustments.get(review_role, 0.0)
         quality += role_adjustment
@@ -4223,7 +4262,7 @@ def _precision_rerank_locations(
     eligible = [row for row in rows[:head_limit] if row[3].get("head_eligible")]
     incumbent_role = _path_role(incumbent[2].path)
     incumbent_blocked = bool(
-        incumbent_role in _CLOSURE_BLOCKED_ROLES
+        not incumbent[3].get("role_allowed_at_head")
         or (
             incumbent_role == "declaration_or_schema"
             and not any(
@@ -4753,6 +4792,13 @@ def _run_search_round(
             round_no=round_no,
             candidate_count=len(ranked),
         ):
+            code_contexts, backfill = _backfill_review_context(
+                index, ranked, code_contexts,
+                candidate_limit=_env_int("MYCODE_LLM_REVIEW_CANDIDATES", 6, minimum=3),
+                context_limit=_env_int("MYCODE_CODE_CONTEXT_LIMIT", 10, minimum=1),
+                limit=_env_int("MYCODE_REVIEW_BACKFILL_LIMIT", 2, minimum=0),
+            )
+            phase_event("progress", "dynamic.review_context_backfill", **backfill)
             candidate_review = review_candidates(
                 llm=controller_llm,
                 issue_text=_issue_query_text(sample.issue_text),
@@ -5088,6 +5134,24 @@ def _entities_for_file(index: RepositoryIndex, path: str) -> list[CodeEntity]:
 
 
 def _flow_entity_support(flow_traces: list[dict[str, Any]]) -> dict[str, float]:
+    """Count distinct structural traces, not repeated agent observations."""
+    unique: dict[str, dict[str, Any]] = {}
+    structural_keys = (
+        "locations", "edges", "statement_edges", "source_steps", "sink_steps",
+        "steps", "statement_nodes", "chain_edges",
+    )
+    for flow in flow_traces:
+        structure = {key: flow[key] for key in structural_keys if flow.get(key)}
+        if not structure:
+            continue
+        signature = json.dumps(structure, sort_keys=True, default=str)
+        previous = unique.get(signature)
+        if previous is None or float(flow.get("confidence") or 0) > float(previous.get("confidence") or 0):
+            unique[signature] = flow
+    return _distinct_flow_entity_support(list(unique.values()))
+
+
+def _distinct_flow_entity_support(flow_traces: list[dict[str, Any]]) -> dict[str, float]:
     support: dict[str, float] = defaultdict(float)
     for flow in flow_traces:
         confidence = float(flow.get("confidence") or 0.0)
@@ -5357,7 +5421,11 @@ def _entity_semantic_atoms(text: str) -> set[str]:
     atoms: set[str] = set()
     for token in tokenize(text):
         for part in re.split(r"[._:/-]+", token.lower()):
-            if len(part) >= 5 and part not in _ENTITY_SEMANTIC_STOP:
+            if len(part) >= 5 and part not in _ENTITY_SEMANTIC_STOP and part not in {
+                "return", "returns", "const", "export", "exports", "import", "imports",
+                "default", "function", "class", "public", "private", "static",
+                "should", "would", "could",
+            }:
                 atoms.add(part)
     return atoms
 
@@ -5491,7 +5559,9 @@ def _rank_entities(
         path = _norm_path(str(reviewed.get("path") or ""))
         confidence = max(0.0, min(1.0, float(reviewed.get("confidence") or 0.0)))
         file_weight = max(8.0, float(file_score.get(path, 0.0) or 0.0) * 0.28)
-        for entity_hint in reviewed.get("entities", []) or []:
+        if not reviewed.get("quote_supported"):
+            continue
+        for entity_hint in reviewed.get("supported_entities", []) or []:
             kind = str(entity_hint.get("kind") or "").lower()
             name = str(entity_hint.get("name") or "")
             if not name:

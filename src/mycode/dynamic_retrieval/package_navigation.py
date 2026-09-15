@@ -37,6 +37,9 @@ def package_entry_candidates(files, issue_text, *, limit=6):
 def navigation_only_file(path, issue_text):
     name = path.rsplit("/", 1)[-1].lower()
     text = issue_text.lower()
+    if name.endswith((".md", ".mdx", ".rst", ".adoc")):
+        from mycode.dynamic_retrieval.search_agent import _issue_allows_non_source_targets
+        return not _issue_allows_non_source_targets(issue_text)
     if name in text:
         return False
     if name.startswith(("changelog", "changes.", "readme")):

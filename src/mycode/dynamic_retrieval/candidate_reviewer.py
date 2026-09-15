@@ -19,6 +19,7 @@ ALLOWED_ROLES = {
     "reproduction_only",
     "test_or_docs",
     "unlikely",
+    "insufficient_evidence",
 }
 
 _REVIEW_CACHE: dict[str, dict[str, Any]] = {}
@@ -424,6 +425,15 @@ def _validate(
             and direct_flow_supported
             and patch_mechanism
         )
+        rejection_reasons = item.get("counterevidence", []) or (
+            [str(item.get("rejection_code"))]
+            if compact_schema and str(item.get("rejection_code") or "none") != "none"
+            else []
+        )
+        if (role == "unlikely" and not quote_supported and rejection_reasons
+                and set(rejection_reasons) <= {"no_source", "no_entity", "no_flow"}
+                and "no_source" in rejection_reasons):
+            role = "insufficient_evidence"
         candidates.append(
             {
                 "path": path,

@@ -74,6 +74,7 @@ python3 scripts/verify_bundle.py
 
 - 已有串行调度与空间监测，默认预留 10 GiB；50 GB 下仍需单例实测环境峰值，详见新部署说明。
 - 完整评测仍需官方元数据兼容性、Docker 与 gold/no-op 对照验证；MiMo 接口需要实际试跑。
+- Rootless Docker 可能让镜像源码出现只有权限变化的 Git `M` 标记。RQ4 在官方 `eval.sh` 执行前，只在该测试容器的 `.git/config` 设置 `core.filemode=false`，并检查 `package.json` 没有内容差异；官方脚本、gold 和镜像内容保持原样。若检查失败会停止评测。此兼容处理需要新的 run-id，且仍须重新验证 no-op/gold 对照，不能把旧超时结果当作通过。
 - 修复器为 Agentless-inspired 独立编辑器，不是官方 Agentless-1.5 原样运行。协议为完整文件、72,000 UTF-8 字节上限、单补丁、无反馈迭代。
 - Omni 最新结果尚未齐备，本包不宣称能完成两个数据集的正式实验。
 - 更新定位输入或模型后使用新 run-id，不混用旧结果。

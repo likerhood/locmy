@@ -32,7 +32,7 @@ def analyze(batch):
             result = reports.get(instance)
             resolved = result['resolved'] if result else None
             # Explicit completed generation with no patch is a known system failure.
-            if result is None and record.get('status') == 'completed' and not pred.get('model_patch'):
+            if result is None and record.get('status') == 'completed' and not pred.get('model_patch') and pred.get('status') in (None, 'empty_patch'):
                 resolved = False
             usage = pred.get('usage') or {}
             row = {'method': method, 'instance_id': instance, 'status': record['status'],
@@ -51,7 +51,7 @@ def analyze(batch):
         summaries.append({'method': method, 'n': n, 'generated': sum(r['generated'] for r in method_rows),
                           'applied_check': sum(r['applied_check'] is True for r in method_rows),
                           'resolved': solved, 'unknown': unknown, 'resolved_percent_lower_bound': 100*solved/n,
-                          'complete': unknown == 0, 'total_tokens': sum(r['total_tokens'] for r in method_rows),
+                          'complete': unknown == 0, 'resolved_percent': 100*solved/n if unknown == 0 else None, 'total_tokens': sum(r['total_tokens'] for r in method_rows),
                           'seconds': sum(r['seconds'] for r in method_rows)})
     paired = []
     if 'magnet' in manifest['methods']:
@@ -71,9 +71,10 @@ def analyze(batch):
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     lines = ['# RQ4 batch analysis', '', 'Unknown means no final test conclusion; lower bound is NOT a completed resolved rate.', '',
-             '| Method | N | Generated | Applied check | Solved | Unknown | Tokens |', '|---|---:|---:|---:|---:|---:|---:|']
+             '| Method | N | Generated | Applied check | Solved | Unknown | Resolved% | Tokens |', '|---|---:|---:|---:|---:|---:|---:|---:|']
     for r in summaries:
-        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {r["total_tokens"]} |')
+        rate = f'{r["resolved_percent"]:.2f}%' if r['complete'] else 'pending'
+        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
     lines += ['', 'Paired outcomes (unknown pairs excluded from win/loss counts):', '', '```json', json.dumps(paired, indent=2), '```']
     (batch / 'analysis.md').write_text('\n'.join(lines) + '\n')
     return report

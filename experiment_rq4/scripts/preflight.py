@@ -55,7 +55,7 @@ def main():
             rows = [json.loads(x) for x in p.open()] if p.exists() else []
             report['predictions'][f'{dataset}/{method}'] = {
                 'rows': len(rows), 'available': sum(r['status'] == 'available' for r in rows)}
-    report['formal_blockers'] = ['50+50 environment no-op/gold controls not executed',
+    report['formal_blockers'] = ['Per-run no-op/gold controls must pass; inspect batch evaluation reports',
         'MAGNET SWE addtest3 and Omni r4 are different versions; choose common frozen method',
         'input compact evidence provenance and model identity require audit',
         'development repair uses byte budget; formal tokenizer-aware context policy not frozen']

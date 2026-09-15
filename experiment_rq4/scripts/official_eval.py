@@ -25,6 +25,22 @@ def run_with_git_mode(container, command, timeout, original, *, workdir, user):
     return original(container, command, timeout)
 
 
+def parse_calypso_without_stray_brace(log, test_spec, original):
+    """Remove a stray shell-output suite only when all expected IDs validate."""
+    parsed = original(log, test_spec)
+    expected = set(test_spec.FAIL_TO_PASS) | set(test_spec.PASS_TO_PASS)
+    prefix = '} - '
+    if not parsed or not expected or not all(name.startswith(prefix) for name in parsed):
+        return parsed
+    corrected = {name[len(prefix):]: status for name, status in parsed.items()}
+    if len(corrected) != len(parsed) or not expected.issubset(corrected):
+        return parsed
+    print(f'[rq4] Removed stray brace suite prefix from {len(parsed)} Calypso '
+          f'test IDs for {test_spec.instance_id}; all {len(expected)} expected IDs matched.',
+          flush=True)
+    return corrected
+
+
 def main():
     p=argparse.ArgumentParser()
     p.add_argument('--dataset',type=Path,required=True)
@@ -35,6 +51,11 @@ def main():
     p.add_argument('--no-op',action='store_true')
     args=p.parse_args()
     from swebench.harness import run_evaluation
+    from swebench.harness.log_parsers import PARSER_REGISTRY
+    original_calypso = PARSER_REGISTRY['parse_log_calypso']
+    def normalized_calypso(log, test_spec):
+        return parse_calypso_without_stray_brace(log, test_spec, original_calypso)
+    PARSER_REGISTRY['parse_log_calypso'] = normalized_calypso
     original = run_evaluation.exec_run_with_timeout
     def normalized_exec(container, command, timeout):
         return run_with_git_mode(

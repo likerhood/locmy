@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from official_eval import run_with_git_mode
+from official_eval import parse_calypso_without_stray_brace, run_with_git_mode
 
 
 class FakeContainer:
@@ -47,6 +47,32 @@ class OfficialEvalTests(unittest.TestCase):
                 lambda *_: self.fail('Official test started after failed baseline check'),
                 workdir='/testbed', user='root',
             )
+
+    def test_calypso_prefix_is_removed_only_with_full_expected_coverage(self):
+        spec = SimpleNamespace(
+            instance_id='Automattic__wp-calypso-21977',
+            FAIL_TO_PASS=['selectors - should pass'],
+            PASS_TO_PASS=['reducer - should remain passing'],
+        )
+        parsed = {
+            '} - selectors - should pass': 'PASSED',
+            '} - reducer - should remain passing': 'PASSED',
+        }
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = parse_calypso_without_stray_brace('', spec, lambda *_: parsed)
+        self.assertEqual(set(result), set(spec.FAIL_TO_PASS + spec.PASS_TO_PASS))
+        self.assertEqual(parsed['} - selectors - should pass'], 'PASSED')
+
+        incomplete = {'} - selectors - should pass': 'PASSED'}
+        self.assertIs(
+            parse_calypso_without_stray_brace('', spec, lambda *_: incomplete),
+            incomplete,
+        )
+        other_prefix = {'bad - selectors - should pass': 'PASSED'}
+        self.assertIs(
+            parse_calypso_without_stray_brace('', spec, lambda *_: other_prefix),
+            other_prefix,
+        )
 
 
 if __name__ == '__main__':

@@ -11,9 +11,9 @@ from progress_view import describe,snapshot,render,tail
 class ProgressTests(unittest.TestCase):
     def test_controls_and_generation_are_distinct(self):
         result=describe(['python','official_eval.py','--predictions','/batch/eval_inputs/case/control_noop.jsonl'])
-        self.assertIn('无补丁',result[1]);self.assertEqual(result[2:],('case','control_noop'))
+        self.assertIn('No-patch',result[1]);self.assertEqual(result[2:],('case','control_noop'))
         result=describe(['python','repair.py','--instance-id','case','--method','magnet'])
-        self.assertIn('生成补丁',result[1]);self.assertEqual(result[2:],('case','magnet'))
+        self.assertIn('Generating patch',result[1]);self.assertEqual(result[2:],('case','magnet'))
 
     def test_reads_active_test_log_and_completed_count(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -25,7 +25,7 @@ class ProgressTests(unittest.TestCase):
             with patch('progress_view.descendants',return_value=[(123,argv)]): data=snapshot(root,directory,123)
             self.assertEqual(data['completed_samples'],1)
             self.assertEqual(data['total_samples'],2)
-            self.assertIn('标准补丁',render(data))
+            self.assertIn('Gold-patch',render(data))
             self.assertIn('waiting for B',render(data))
 
     def test_log_tail_bounds_and_redacts_urls(self):

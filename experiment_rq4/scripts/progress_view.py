@@ -38,21 +38,21 @@ def describe(argv):
     if 'official_eval.py' in names:
         pred=Path(argument(argv,'--predictions'))
         method=pred.stem; instance=pred.parent.name
-        label={'control_noop':'无补丁环境对照（预期未解决）', 'control_gold':'标准补丁环境对照（预期解决）'}.get(method,'官方补丁测试')
+        label={'control_noop':'No-patch control (expect unresolved)', 'control_gold':'Gold-patch control (expect resolved)'}.get(method,'Official patch evaluation')
         return 90, label, instance, method
     if 'repair.py' in names:
-        return 100,'生成补丁（等待模型或处理响应）',argument(argv,'--instance-id'),argument(argv,'--method')
+        return 100,'Generating patch',argument(argv,'--instance-id'),argument(argv,'--method')
     if 'check_patch.py' in names:
         out=Path(argument(argv,'--run-dir'))
-        return 100,'检查补丁能否应用',out.name,out.parent.name
+        return 100,'Checking patch application',out.name,out.parent.name
     if argv and Path(argv[0]).name=='docker' and 'pull' in argv:
-        return 95,'拉取官方测试镜像','',''
-    if argv and Path(argv[0]).name=='git': return 80,'获取或准备代码仓库','',''
-    if '-m' in argv and 'pip' in argv: return 80,'安装 Python 评测依赖','',''
-    if 'prepare_harness_dataset.py' in names: return 80,'准备并校验评测数据','',''
-    if 'run_batch.py' in names: return 30,'调度样本／整理结果','',''
-    if 'install_harness.py' in names: return 20,'准备 SWE-bench 评测工具','',''
-    return 0,'基础准备或阶段切换','',''
+        return 95,'Pulling test image','',''
+    if argv and Path(argv[0]).name=='git': return 80,'Preparing repository','',''
+    if '-m' in argv and 'pip' in argv: return 80,'Installing evaluation dependencies','',''
+    if 'prepare_harness_dataset.py' in names: return 80,'Validating evaluation data','',''
+    if 'run_batch.py' in names: return 30,'Scheduling / saving results','',''
+    if 'install_harness.py' in names: return 20,'Preparing SWE-bench harness','',''
+    return 0,'Setup / stage transition','',''
 
 
 def tail(path):
@@ -72,7 +72,7 @@ def snapshot(root, directory, pid):
     batch=root/'runs/batches'/directory.name
     processes=descendants(pid)
     ranked=[(*describe(argv), p) for p,argv in processes]
-    _,stage,instance,method,active_pid=max(ranked,key=lambda x:x[0]) if ranked else (0,'未发现进程，检查最终状态','','',None)
+    _,stage,instance,method,active_pid=max(ranked,key=lambda x:x[0]) if ranked else (0,'No process found; check final status','','',None)
     data=dict(stage=stage,instance=instance,method=method,active_pid=active_pid,completed_samples=0,total_samples=None,logs=[])
     try:
         manifest=json.loads((batch/'manifest.json').read_text())
@@ -80,27 +80,37 @@ def snapshot(root, directory, pid):
         data['completed_samples']=sum((batch/'completed_samples'/f'{i}.json').exists() for i in manifest['instance_ids'])
     except (OSError,ValueError,KeyError): pass
     candidates=[]
-    if method and stage.startswith(('无补丁','标准补丁','官方补丁')):
+    if method and stage.startswith(('No-patch','Gold-patch','Official patch')):
         folder=batch/'evaluation'/method
         if folder.exists():
             candidates=[p for p in folder.rglob('*') if p.is_file() and p.suffix in ('.log','.txt')]
             # Avoid displaying a different sample's old test output.
             candidates=[p for p in candidates if instance in str(p.relative_to(folder)) or p.name=='harness.log']
-    elif stage=='拉取官方测试镜像': candidates=[batch/'image_pull.log']
-    elif stage=='安装 Python 评测依赖': candidates=[root/'reports/setup/pip.log']
+    elif stage=='Pulling test image': candidates=[batch/'image_pull.log']
+    elif stage=='Installing evaluation dependencies': candidates=[root/'reports/setup/pip.log']
     # Model response files are deliberately not echoed.
     entries=[v for p in candidates if (v:=tail(p))]
     data['logs']=sorted(entries,key=lambda x:x['age_seconds'])[:2]
     return data
 
 
-def render(data):
+def render(data, previous=None):
     total=data['total_samples'] if data['total_samples'] is not None else '?'
-    lines=[f"[进度] 已完成样本 {data['completed_samples']}/{total} | 当前：{data['stage']} | PID={data['active_pid']}"]
-    if data['instance'] or data['method']: lines.append(f"       样本={data['instance']} | 方法/对照={data['method']}")
-    for item in data['logs']:
-        lines.append(f"       日志 {item['path']}（{item['age_seconds']}秒前更新）\n       {item['tail']}")
-    if not data['logs']: lines.append('       暂无可显示的步骤日志；进程存活不代表有进展。')
+    lines=[f"[progress] samples={data['completed_samples']}/{total} | {data['stage']} | pid={data['active_pid']}"]
+    if data['instance'] or data['method']:
+        lines.append(f"  instance={data['instance']} method={data['method']}")
+    logs=data['logs']
+    detailed=[item for item in logs if Path(item['path']).name != 'harness.log']
+    for item in (detailed or logs)[:1]:
+        lines.append(f"  log={Path(item['path']).name} updated={item['age_seconds']}s ago")
+        seen=previous and any(old['path']==item['path'] and old['tail']==item['tail'] for old in previous.get('logs', []))
+        if not seen:
+            snippet=' '.join(item['tail'].split())
+            # Full paths and full output remain in status.json and the original log.
+            snippet=re.sub(r'(?:/|logs/)[^\s|]+', '[path]', snippet)
+            lines.append('  latest: '+snippet[:180]+('...' if len(snippet)>180 else ''))
+    if not logs:
+        lines.append('  No step log yet. Process liveness does not prove progress.')
     return '\n'.join(lines)+'\n'
 
 
@@ -111,10 +121,10 @@ def main():
     if not re.fullmatch(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*',args.run_id):parser.error('Invalid run-id')
     directory=ROOT/'runs/pipeline'/args.run_id
     status=json.loads((directory/'status.json').read_text())
-    print('流水线状态：',status['state'],' 最后更新：',status['updated_at'])
+    print('Pipeline:',status['state'],' Updated:',status['updated_at'])
     if status['state'] in ('running','stopping'):
         print(render(snapshot(ROOT,directory,status['child_pid'])),end='')
-    else: print('流水线已退出；查看 pipeline.log 和对应批次 analysis.md。')
+    else: print('Pipeline exited. See pipeline.log and batch analysis.md.')
 
 
 if __name__=='__main__':main()

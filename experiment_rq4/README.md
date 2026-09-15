@@ -176,3 +176,8 @@ watch -n 5 python3 scripts/progress_view.py --run-id swe50v2-mimo-smoke-v1
 新启动的 server_pipeline.sh 自动显示这些内容，命令参数不变。
 旧任务的终端不会热更新，使用独立查看命令即可。若服务器重启或进程被强杀，
 旧 status.json 可能残留 running，应结合更新时间与 PID 判断。
+
+Progress display uses English labels. Each refresh shows one preferred step log with
+its basename and age; unchanged log excerpts are omitted by the pipeline supervisor.
+Excerpts are limited to 180 characters and embedded paths are abbreviated. Full log
+paths and excerpts remain available in status.json; original log files are unchanged.

@@ -65,14 +65,17 @@ def supervise(command, directory, interval=30):
                             emit(line)
                 reader = threading.Thread(target=copy, daemon=True)
                 reader.start()
+                previous_progress = None
                 while True:
                     status('stopping' if stop else 'running')
                     try:
                         code = process.wait(timeout=interval)
                         break
                     except subprocess.TimeoutExpired:
-                        emit(f'[heartbeat] 总耗时={int(time.monotonic()-start)}秒；进程存活不代表测试通过。\n')
-                        emit(render(snapshot(ROOT, directory, process.pid)))
+                        emit(f'[heartbeat] elapsed={int(time.monotonic()-start)}s\n')
+                        progress = snapshot(ROOT, directory, process.pid)
+                        emit(render(progress, previous_progress))
+                        previous_progress = progress
                 reader.join(timeout=5)
                 state = 'interrupted' if stop else 'completed' if code == 0 else 'failed'
                 code = 128+stop[0] if stop else code

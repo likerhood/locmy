@@ -40,7 +40,9 @@ chmod 600 .env.local
 RQ4_BASE_URL=https://你的接口基础地址/v1
 RQ4_API_KEY=你的密钥
 RQ4_MODEL=服务商实际模型ID
-RQ4_REQUEST_TIMEOUT=180
+RQ4_REQUEST_TIMEOUT=900
+RQ4_HTTP_RETRIES=2
+RQ4_HTTP_RETRY_SLEEPS=10,30
 # 服务器代理会破坏该 API 的 TLS 时启用；只让上述 API 主机直连
 RQ4_API_DIRECT=1
 ```
@@ -78,12 +80,12 @@ python3 scripts/verify_bundle.py
 - 已有串行调度与空间监测，默认预留 10 GiB；50 GB 下仍需单例实测环境峰值，详见新部署说明。
 - 完整评测仍需官方元数据兼容性、Docker 与 gold/no-op 对照验证；所选模型接口需要实际试跑。
 - Rootless Docker 可能让镜像源码出现只有权限变化的 Git `M` 标记。RQ4 在官方 `eval.sh` 执行前，只在该测试容器的 `.git/config` 设置 `core.filemode=false`，并检查 `package.json` 没有内容差异；官方脚本、gold 和镜像内容保持原样。若检查失败会停止评测。此兼容处理需要新的 run-id，且仍须重新验证 no-op/gold 对照，不能把旧超时结果当作通过。
-- Automattic Calypso 的 Jest 日志中可能出现孤立的 `}`，锁定版本的官方解析器会把它误当作套件名，令所有测试 ID 多出 `} - ` 前缀。RQ4 只在所有已解析 ID 都带此前缀、去掉它后能完整覆盖该样本官方 F2P/P2P 名单时纠正判分用的 ID；原始 `test_output.txt`、状态和官方评测脚本保持不变。解析器兼容处理需要新的 run-id 和 no-op/gold 重验；不能把先前的 gold 对照失败改写为通过。
-- 细粒度定位要求纯 JSON；为兼容部分 OpenAI 兼容模型，也接受且仅接受一个可独立解析的 `json` Markdown 代码块。下游修复使用 CoSIL 风格的英文推理加 SEARCH/REPLACE 块，并保留旧 JSON `edits` 作为兼容输入。响应格式、结束原因和失败阶段写入候选记录；格式失败不会作为同一收费请求自动重发。
+- Automattic Calypso 的锁定版解析器可能把 shell 跟踪或补丁正文误当作 Jest suite，给测试 ID 加入无关前缀或挤掉最外层 suite。RQ4 只在每个官方 F2P/P2P ID 都能按完整的 `#函数 + 测试描述` 层级后缀唯一、一一对应时规范化判分 ID；缺失、重复或歧义均保持失败。原始 `test_output.txt`、测试状态和官方评测脚本保持不变。解析器兼容处理需要新的 run-id 和 no-op/gold 重验；不能把先前的 gold 对照失败改写为通过。
+- 细粒度定位要求纯 JSON；为兼容部分 OpenAI 兼容模型，也接受且仅接受一个可独立解析的 `json` Markdown 代码块。下游修复使用 CoSIL 风格的英文推理加 SEARCH/REPLACE 块，并保留旧 JSON `edits` 作为兼容输入。响应格式、结束原因和失败阶段写入候选记录；格式失败不会作为同一收费请求自动重发。若所有修复候选都因 API 基础设施失败且没有可评测补丁，该方法样本标为 `infrastructure_failure`，分析结果保持 `unknown`，不计作未解决。
 - 下游流程按 CoSIL RQ3 的结构适配到所选模型：每种方法先保留最多 Top-15 文件及其上游函数排序，再执行一次共享的函数/行区间定位；修复上下文只包含这些区间及前后各 10 行。随后生成 10 个候选（1 个 temperature=0，9 个 temperature=0.8），按归一化补丁投票和稳定破平规则选择，最终只评测一个补丁。
 - `Top-15` 表示使用上游实际提供的前 15 名。CoSIL 历史快照只有 5 个文件、GALA 某些样本少于 15 个时，程序使用全部已有项，不补造排名。每条 `normalized` 记录同时保存 `found_files` 和 `found_functions`；上游函数为空时，共享细粒度定位阶段从候选文件函数定义清单中选择。
 - 这不是逐字复刻 CoSIL 的 `patch_gen.sh`：模型由所选 env 文件决定，修复输出采用 CoSIL SEARCH/REPLACE，候选选择使用归一化去重多数票；当前不运行 CoSIL 的模型生成 reproduction/regression 测试，避免额外测试生成质量成为五种定位方法之间的混杂变量。no-op/gold 对照和最终官方 SWE-bench 测试保持不变。
-- 每个样本方法最多产生 11 次收费请求，所以 1 样本 × 5 方法最多 55 次，50 样本 × 5 方法最多 2750 次。`--mode check` 会在收费前打印精确计划数。每次请求独立记录在 `attempts/<method>/<instance>/paid_calls/`；只有完整响应可自动复用，结果不确定的请求不会自动重发。
+- 每个样本方法最多产生 11 次收费请求，所以 1 样本 × 5 方法最多 55 次，50 样本 × 5 方法最多 2750 次。`--mode check` 会在收费前打印精确计划数。每次请求独立记录在 `attempts/<method>/<instance>/paid_calls/`；只有完整响应可自动复用。明确的 429/500/502/503/504 按 `RQ4_HTTP_RETRIES` 有界重试。单次请求默认等待 900 秒；修复候选若发生结果不确定的超时或连接失败，会保留现场、记为 `failed:api_request` 并继续后续候选，不重发同一候选。共享细粒度定位失败仍停止该运行，因为缺少定位上下文时继续会改变实验协议。
 - Omni 最新结果尚未齐备，本包不宣称能完成两个数据集的正式实验。
 - 更新定位输入或模型后使用新 run-id，不混用旧结果。
 
@@ -104,11 +106,11 @@ RQ4 涉及四条相互独立的网络路径，不能用一项“镜像”配置�
 
 完整的数据流、超参数逐项对比、候选失败语义和审计文件说明见[CoSIL RQ3 下游修复对齐协议](CoSIL_RQ3下游修复对齐协议.md)。
 
-当前协议 `cosil_rq3_repair_top15_k10_v4` 将每种上游方法的前 15 个可用文件及函数定位交给一次细粒度函数/行定位，再把选中区间前后各 10 行交给同一修复器。修复器使用英文 CoSIL 风格的先分析、后 SEARCH/REPLACE 输出协议，生成 1 个 temperature=0、top_p=1 的贪心候选和 9 个 temperature=0.8、top_p=1 的采样候选。细粒度定位使用 temperature=0.8、top_p=1。定位与修复的最大输出均为 8192 token，以容纳 Qwen3.5 推理输出；这是面向当前模型的兼容设置，不等于原 CoSIL 对所有模型都采用相同预算。
+当前协议 `cosil_rq3_repair_top15_k10_v5` 将每种上游方法的前 15 个可用文件及函数定位交给一次细粒度函数/行定位，再把选中区间前后各 10 行交给同一修复器。修复器使用英文 CoSIL 风格的先分析、后 SEARCH/REPLACE 输出协议，生成 1 个 temperature=0、top_p=1 的贪心候选和 9 个 temperature=0.8、top_p=1 的采样候选。细粒度定位使用 temperature=0.8、top_p=1。定位与修复的最大输出均为 8192 token，以容纳 Qwen3.5 推理输出；这是面向当前模型的兼容设置，不等于原 CoSIL 对所有模型都采用相同预算。v5 将结果不确定的修复请求固定记为基础设施候选失败，不重发该候选并继续后续候选。
 
 每个候选必须同时满足：编辑文件来自细粒度上下文；SEARCH 文本出现在模型看到的代码中，并在完整原文件中唯一匹配；修改非空；Python/JSON 文件通过标准库语法解析。有效候选按修改后文件内容归一化，先按同一补丁的票数选择，再以修改行数和候选编号稳定破平。只有最终候选进入一次官方评测。所有候选的原始 provider response、解析错误、校验结果、归一化摘要和选择依据均保存在对应 attempt 目录。
 
-原版脚本向修复模型请求 20 个样本，但其公开候选测试和排序路径只消费编号 0–9。当前实验直接生成这 10 个实际进入选择阶段的候选，避免额外购买 10 个随后被丢弃的响应。这里的候选 `generated` 只表示响应成功解析、编辑可唯一应用并通过静态检查；它不表示 SWE-bench 测试已经解决。`failed` 会进一步记录失败发生在 `response_parse`、`edit_application` 或 `static_validation`，方便区分输出被截断、SEARCH 不唯一和语法无效等原因。
+原版脚本向修复模型请求 20 个样本，但其公开候选测试和排序路径只消费编号 0–9。当前实验直接生成这 10 个实际进入选择阶段的候选，避免额外购买 10 个随后被丢弃的响应。这里的候选 `generated` 只表示响应成功解析、编辑可唯一应用并通过静态检查；它不表示 SWE-bench 测试已经解决。`failed` 会进一步记录失败发生在 `api_request`、`response_parse`、`edit_application` 或 `static_validation`，方便区分网络响应丢失、输出被截断、SEARCH 不唯一和语法无效等原因。`analysis.md` 单列汇总基础设施候选失败，正式比较时必须披露候选数不足的样本。
 
 原版 CoSIL RQ3 还用独立生成的 reproduction/regression tests 过滤候选。当前 SWE/Omni 冻结数据没有与五种定位方法共享且经过验证的独立生成测试集，因此本协议不会拿官方 F2P/P2P 测试做候选选择；这样避免使用最终评测证据进行 rerank。该差异写入 `configs/protocol.json` 的 `rerank_test_policy`，不能把本协议描述为逐行复刻原版测试 reranker。若后续加入候选无关、按样本冻结的生成测试，必须给测试来源和模型调用单独留痕、先在 base/gold 对照验证，并使用新协议名和新 run-id。
 

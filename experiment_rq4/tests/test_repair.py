@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from repair import (LOCALIZATION_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, api_call, apply_edits,
                     changed_line_count, choose_candidate, line_evidence, localized_context,
-                    make_patch, normalized_patch_key, parse_locations, parse_model_edits,
+                    failed_request_candidate, make_patch, normalized_patch_key, parse_locations, parse_model_edits,
                     SEARCH_MARKER, DIVIDER_MARKER, REPLACE_MARKER, validate_path,
                     validate_updated_files)
 from preflight import load_env
@@ -46,6 +46,23 @@ class RepairTests(unittest.TestCase):
                     api_call(Path(tmp) / 'connection', [], 0, 10)
             self.assertEqual(request.call_count, 1)
 
+    def test_uncertain_repair_request_becomes_auditable_failed_candidate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            call_dir = Path(tmp) / 'repair_00'
+            call_dir.mkdir()
+            (call_dir / 'failure.json').write_text(json.dumps({
+                'status': 'failed', 'error_type': 'TimeoutError',
+                'http_attempt_count': 1,
+            }))
+            candidate = failed_request_candidate(
+                0, 0, 1.0, TimeoutError('read timed out'), call_dir,
+            )
+        self.assertEqual(candidate['status'], 'failed')
+        self.assertEqual(candidate['failure_stage'], 'api_request')
+        self.assertEqual(candidate['request_failure']['error_type'], 'TimeoutError')
+        self.assertEqual(candidate['model_patch'], '')
+        self.assertIn('not_resent', candidate['retry_safety'])
+
     def test_prompts_are_english_and_state_output_contracts(self):
         self.assertTrue(LOCALIZATION_SYSTEM_PROMPT.isascii())
         self.assertIn('exactly one valid JSON object', LOCALIZATION_SYSTEM_PROMPT)
@@ -56,6 +73,11 @@ class RepairTests(unittest.TestCase):
         self.assertIn('NO_VALID_EDIT', REPAIR_SYSTEM_PROMPT)
 
         protocol = json.loads((ROOT / 'configs/protocol.json').read_text())
+        self.assertEqual(protocol['name'], 'cosil_rq3_repair_top15_k10_v5')
+        self.assertEqual(
+            protocol['uncertain_repair_request_policy'],
+            'record_failed_api_candidate_without_resend_then_continue',
+        )
         self.assertEqual(protocol['prompt_contract'], 'english_cosil_search_replace_v3')
         self.assertEqual(protocol['localization_temperature'], 0.8)
         self.assertEqual(protocol['localization_top_p'], 1.0)

@@ -22,7 +22,8 @@ class BatchTests(unittest.TestCase):
             put(root/'manifest.json',{'methods':['magnet','locagent'],'instance_ids':['a','b','c']})
             put(root/'records/magnet/a.json',{'status':'completed','prediction':{
                 'model_patch':'diff','candidate_count':10,'valid_candidate_count':7,
-                'candidate_outcomes':{'generated':7,'failed:response_parse':3},
+                'candidate_outcomes':{'generated':7,'failed:response_parse':2,'failed:api_request':1},
+                'infrastructure_candidate_failures':1,
                 'unique_nonempty_patches':5,'usage':{'total_tokens':12}}})
             put(root/'records/magnet/b.json',{'status':'completed','prediction':{'model_patch':''}})
             put(root/'evaluation/magnet/a/report.json',{'a':{'resolved':True}})
@@ -34,7 +35,8 @@ class BatchTests(unittest.TestCase):
             self.assertEqual(result['summary'][0]['repair_candidates'],10)
             self.assertEqual(result['summary'][0]['valid_repair_candidates'],7)
             self.assertEqual(result['summary'][0]['candidate_outcomes'],
-                             {'generated':7,'failed:response_parse':3})
+                             {'generated':7,'failed:response_parse':2,'failed:api_request':1})
+            self.assertEqual(result['summary'][0]['infrastructure_candidate_failures'],1)
             self.assertEqual(result['paired'][0]['ours_only'],1)
             self.assertEqual(result['paired'][0]['unknown'],2)
 
@@ -44,6 +46,23 @@ class BatchTests(unittest.TestCase):
             for sub in ['try1','try2']:
                 put(root/sub/'report.json',{'a':{'resolved':True}})
             with self.assertRaises(ValueError):official_reports(root)
+
+    def test_infrastructure_only_generation_stays_unknown_without_official_eval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            batch = Path(tmp)
+            instance = 'a'
+            put(batch/'records/locagent/a.json', {
+                'status': 'completed',
+                'prediction': {
+                    'status': 'infrastructure_failure',
+                    'model_patch': '',
+                    'infrastructure_candidate_failures': 10,
+                },
+            })
+            result = run_batch.evaluate_one(
+                batch, object(), {'instance_id': instance}, batch/'dataset.jsonl', 'locagent',
+            )
+            self.assertIsNone(result)
 
     def test_missing_predictions_prevents_calls(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,5 +1,5 @@
 {
-  "name": "cosil_rq3_repair_top15_k10_v4",
+  "name": "cosil_rq3_repair_top15_k10_v5",
   "localization_model_label": "Qwen3.5-397B-A17B",
   "file_top_k": 15,
   "localization_excerpt_radius": 18,
@@ -25,6 +25,7 @@
   ],
   "candidate_normalization": "changed_content_eol_and_trailing_whitespace_v1",
   "candidate_selection": "validated_normalized_vote_then_smallest_change_then_lowest_index",
+  "uncertain_repair_request_policy": "record_failed_api_candidate_without_resend_then_continue",
   "status": "formal_candidate_protocol",
   "prompt_contract": "english_cosil_search_replace_v3",
   "rerank_test_policy": "candidate-independent generated tests are not yet available for this dataset; official F2P/P2P tests are never used for candidate selection",

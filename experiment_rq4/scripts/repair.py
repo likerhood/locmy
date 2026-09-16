@@ -21,9 +21,14 @@ import urllib.request
 from preflight import load_env
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_REQUEST_TIMEOUT = 900
 SEARCH_MARKER = '<' * 7 + ' SEARCH'
 DIVIDER_MARKER = '=' * 7
 REPLACE_MARKER = '>' * 7 + ' REPLACE'
+
+
+class PaidCallUnavailable(RuntimeError):
+    """A durable paid-call directory exists without a reusable response."""
 
 LOCALIZATION_SYSTEM_PROMPT = """You are the fine-grained localization stage of a software repair system.
 Identify the smallest defensible function and line intervals that must be inspected or edited to solve the issue.
@@ -301,7 +306,9 @@ def api_call(call_dir, messages, temperature, max_tokens, top_p=1.0):
     if result_path.exists() and response_path.exists():
         return json.loads(result_path.read_text()), json.loads(response_path.read_text())
     if call_dir.exists():
-        raise RuntimeError(f'Uncertain or failed paid request at {call_dir}; automatic retry disabled')
+        raise PaidCallUnavailable(
+            f'Uncertain or failed paid request at {call_dir}; the original request is not resent'
+        )
     call_dir.mkdir(parents=True)
     body = {'model': os.environ['RQ4_MODEL'], 'messages': messages,
             'temperature': temperature, 'top_p': top_p,
@@ -328,7 +335,10 @@ def api_call(call_dir, messages, temperature, max_tokens, top_p=1.0):
             data=json.dumps(body).encode(), headers={'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + os.environ['RQ4_API_KEY']})
         try:
-            with urllib.request.urlopen(request, timeout=int(os.getenv('RQ4_REQUEST_TIMEOUT', '180'))) as response:
+            with urllib.request.urlopen(
+                    request,
+                    timeout=int(os.getenv('RQ4_REQUEST_TIMEOUT', str(DEFAULT_REQUEST_TIMEOUT))),
+            ) as response:
                 data = json.load(response)
             save(response_path, data)
             result = {'status': 'completed', 'elapsed_seconds': time.monotonic()-start,
@@ -359,6 +369,33 @@ def api_call(call_dir, messages, temperature, max_tokens, top_p=1.0):
                 failure['error_reason_type'] = type(exc.reason).__name__
             save(call_dir/'failure.json', failure)
             raise
+
+
+def failed_request_candidate(index, temperature, top_p, exc, call_dir):
+    """Represent a lost repair response without retrying or aborting the batch."""
+    failure_path = call_dir/'failure.json'
+    request_failure = {}
+    if failure_path.exists():
+        try:
+            request_failure = json.loads(failure_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            request_failure = {'status': 'unreadable_failure_record'}
+    return {
+        'candidate_index': index,
+        'temperature': temperature,
+        'top_p': top_p,
+        'status': 'failed',
+        'failure_stage': 'api_request',
+        'model_patch': '',
+        'usage': {},
+        'provider_request_id': None,
+        'finish_reason': None,
+        'response_content_chars': 0,
+        'error_type': type(exc).__name__,
+        'error_detail': str(exc)[:500],
+        'request_failure': request_failure,
+        'retry_safety': 'not_resent_because_provider_completion_or_billing_may_be_uncertain',
+    }
 
 
 def load_files(repo, sample, found_files, top_k):
@@ -483,8 +520,22 @@ def main():
             temperature = protocol['greedy_temperature'] if index == 0 else protocol['sampling_temperature']
             top_p = protocol['greedy_top_p'] if index == 0 else protocol['sampling_top_p']
             max_tokens = protocol['greedy_max_output_tokens'] if index == 0 else protocol['sampling_max_output_tokens']
-            call_result, response = api_call(run_dir/'paid_calls'/f'repair_{index:02d}', repair_messages,
-                                             temperature, max_tokens, top_p)
+            call_dir = run_dir/'paid_calls'/f'repair_{index:02d}'
+            try:
+                call_result, response = api_call(
+                    call_dir, repair_messages, temperature, max_tokens, top_p,
+                )
+            except (PaidCallUnavailable, urllib.error.URLError, TimeoutError,
+                    ConnectionError, json.JSONDecodeError) as exc:
+                candidate = failed_request_candidate(index, temperature, top_p, exc, call_dir)
+                save(run_dir/'candidates'/f'{index:02d}.json', candidate)
+                candidates.append(candidate)
+                print(f'[repair-candidate] method={args.method} '
+                      f'candidate={index+1}/{protocol["candidates_per_instance"]} '
+                      f'temperature={temperature} top_p={top_p} '
+                      f'status=failed failure_stage=api_request '
+                      f'error_type={type(exc).__name__} patch_bytes=0', flush=True)
+                continue
             candidate = {'candidate_index': index, 'temperature': temperature, 'top_p': top_p,
                 'status': 'failed', 'failure_stage': 'response_parse',
                 'model_patch': '', 'usage': call_result['usage'],
@@ -527,15 +578,24 @@ def main():
         for key, value in (item.get('usage') or {}).items():
             if isinstance(value, (int, float)):
                 usage[key] = usage.get(key, 0) + value
+    infrastructure_failures = sum(
+        x.get('failure_stage') == 'api_request' for x in candidates
+    )
+    result_status = (
+        'generated' if selected else
+        'infrastructure_failure' if infrastructure_failures else
+        'empty_patch'
+    )
     result = {'instance_id': args.instance_id,
         'model_name_or_path': f'rq4-{args.method}-{os.environ["RQ4_MODEL"]}',
         'model_patch': selected['model_patch'] if selected else '',
-        'status': 'generated' if selected else 'empty_patch',
+        'status': result_status,
         'protocol': protocol['name'],
         'selected_candidate': selected['candidate_index'] if selected else None,
         'candidate_count': len(candidates),
         'valid_candidate_count': sum(x.get('validation', {}).get('status') == 'passed' for x in candidates),
         'candidate_outcomes': candidate_outcomes,
+        'infrastructure_candidate_failures': infrastructure_failures,
         'unique_nonempty_patches': len({x.get('normalized_patch_sha256')
             for x in candidates if x.get('normalized_patch_sha256')}),
         'selection': ({'normalized_patch_sha256': selected.get('normalized_patch_sha256'),

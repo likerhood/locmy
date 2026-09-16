@@ -42,6 +42,7 @@ def analyze(batch):
                    'candidate_count': pred.get('candidate_count', 0),
                    'valid_candidate_count': pred.get('valid_candidate_count', 0),
                    'candidate_outcomes': json.dumps(candidate_outcomes, sort_keys=True),
+                   'infrastructure_candidate_failures': pred.get('infrastructure_candidate_failures', 0),
                    'unique_nonempty_patches': pred.get('unique_nonempty_patches', 0),
                    'selected_candidate': pred.get('selected_candidate'),
                    'resolved': resolved, 'official_report': result is not None,
@@ -66,6 +67,9 @@ def analyze(batch):
                           'repair_candidates': sum(r['candidate_count'] for r in method_rows),
                           'valid_repair_candidates': sum(r['valid_candidate_count'] for r in method_rows),
                           'candidate_outcomes': method_candidate_outcomes,
+                          'infrastructure_candidate_failures': sum(
+                              r['infrastructure_candidate_failures'] for r in method_rows
+                          ),
                           'unique_nonempty_patches': sum(r['unique_nonempty_patches'] for r in method_rows),
                           'seconds': sum(r['seconds'] for r in method_rows)})
     paired = []
@@ -86,11 +90,11 @@ def analyze(batch):
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     lines = ['# RQ4 batch analysis', '', 'Unknown means no final test conclusion; lower bound is NOT a completed resolved rate.', '',
-             '| Method | N | Generated | Candidates | Valid candidates | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
-             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+             '| Method | N | Generated | Candidates | Valid candidates | API failures | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
+             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in summaries:
         rate = f'{r["resolved_percent"]:.2f}%' if r['complete'] else 'pending'
-        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["repair_candidates"]} | {r["valid_repair_candidates"]} | {r["unique_nonempty_patches"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
+        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["repair_candidates"]} | {r["valid_repair_candidates"]} | {r["infrastructure_candidate_failures"]} | {r["unique_nonempty_patches"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
     lines += ['', 'Candidate outcomes (generated, empty, or failed stage):', '', '```json',
               json.dumps({r['method']: r['candidate_outcomes'] for r in summaries}, indent=2), '```']
     lines += ['', 'Paired outcomes (unknown pairs excluded from win/loss counts):', '', '```json', json.dumps(paired, indent=2), '```']

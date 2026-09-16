@@ -83,7 +83,7 @@ def generate_one(batch, args, sample):
         with (out.parent/f'{instance}.log').open('w') as log:
             protocol = json.loads((ROOT/'configs/protocol.json').read_text())
             paid_calls = 1 + protocol.get('candidates_per_instance', 1)
-            request_timeout = int(os.getenv('RQ4_REQUEST_TIMEOUT','180'))
+            request_timeout = int(os.getenv('RQ4_REQUEST_TIMEOUT','900'))
             ACTIVE_RESOURCES.run(command, stdout=log, stderr=subprocess.STDOUT,
                                  timeout=(request_timeout + 30) * paid_calls + 120)
         prediction = read_rows(out/'prediction.jsonl')[0]
@@ -106,6 +106,8 @@ def evaluate_one(batch, args, sample, dataset_file, method, gold=None):
         path = batch/'records'/method/f'{instance}.json'
         record = json.loads(path.read_text()) if path.exists() else {}
         prediction = record.get('prediction', {})
+        if record.get('status') == 'completed' and prediction.get('status') == 'infrastructure_failure':
+            return None
         if record.get('status') != 'completed' or prediction.get('status') not in ['generated','empty_patch']:
             raise RuntimeError(f'{method}/{instance}: generation incomplete; inspect record, no automatic paid retry')
         patch_text = prediction.get('model_patch','')

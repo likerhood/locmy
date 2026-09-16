@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 def urls(repo):
     official = f'https://github.com/{repo}.git'
     prefix = os.environ.get('RQ4_GITHUB_MIRROR_PREFIX', os.getenv('GITHUB_MIRROR_PREFIX',
-        os.getenv('REPO_GITHUB_MIRROR_PREFIX', 'https://gh.xmly.dev'))).strip().rstrip('/')
+        os.getenv('REPO_GITHUB_MIRROR_PREFIX', ''))).strip().rstrip('/')
     if prefix:
         parsed = urlsplit(prefix)
         if parsed.scheme != 'https' or not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment:

@@ -22,6 +22,13 @@ def put(path,obj):
 
 
 class SerialTests(unittest.TestCase):
+    def test_git_cache_defaults_to_official_github_without_mirror(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                git_cache.urls('org/project'),
+                ['https://github.com/org/project.git'],
+            )
+
     def test_git_mirror_failure_official_fallback_and_reuse(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);source=root/'source';source.mkdir()

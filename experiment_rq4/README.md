@@ -45,6 +45,8 @@ RQ4_HTTP_RETRIES=2
 RQ4_HTTP_RETRY_SLEEPS=10,30
 # 服务器代理会破坏该 API 的 TLS 时启用；只让上述 API 主机直连
 RQ4_API_DIRECT=1
+# 自动禁用 GitHub 镜像，并让 GitHub 绕过继承的 HTTP(S) 代理
+RQ4_GITHUB_DIRECT=1
 ```
 
 终端同名变量优先于文件；非空 RQ4_MODEL 优先于旧 MODEL_API_NAME。改变的是修复模型，Qwen 定位不重跑。
@@ -98,7 +100,7 @@ python3 scripts/verify_bundle.py
 RQ4 涉及四条相互独立的网络路径，不能用一项“镜像”配置替代全部路径：
 
 - 模型 API 由 Python 进程访问，默认继承 shell 的 `HTTP(S)_PROXY`。若代理对 API 主机产生 TLS EOF，在所选 env 文件设置 `RQ4_API_DIRECT=1`；加载配置时只把 `RQ4_BASE_URL` 的主机追加到 `NO_PROXY` 和 `no_proxy`，无需每次手工 export。该选择写入批次 manifest，改变设置后必须使用新 run-id。
-- Git 源码先用 `RQ4_GITHUB_MIRROR_PREFIX`，再回退 GitHub。确认镜像不可用时可在 env 文件中设置空的 `RQ4_GITHUB_MIRROR_PREFIX=`。每次 clone/fetch 的真实错误保存在 `runs/batches/<run-id>/repo_clone.log`。评测镜像已经包含同一提交时，也可按上文工具核验后导入 Git 对象。
+- GitHub 源码默认使用 `RQ4_GITHUB_DIRECT=1`：加载 env 时会覆盖继承的镜像设置、将 `RQ4_GITHUB_MIRROR_PREFIX` 清空，并把 GitHub 下载主机追加到 `NO_PROXY`/`no_proxy`。配置由 pipeline 进程传给 setup、仓库缓存和修复子进程，不需要在终端手工 `export`；它不会修改父终端。若某台机器必须使用镜像，可显式设置 `RQ4_GITHUB_DIRECT=0` 和 `RQ4_GITHUB_MIRROR_PREFIX=https://...`。每次 clone/fetch 的真实错误保存在 `runs/batches/<run-id>/repo_clone.log`。评测镜像已经包含同一提交时，也可按上文工具核验后导入 Git 对象。该选择写入批次 manifest，改变后必须使用新 run-id。
 - Python 包和 Hugging Face 数据由宿主 Python/pip 下载，使用各自的 index、endpoint、代理或 `NO_PROXY` 配置；Docker registry mirror 对它们无效。
 - Docker Hub 镜像由 rootless Docker daemon 拉取，使用该 daemon 的 `daemon.json` registry mirror 或 systemd 代理。只有修改 daemon 配置后才需重启 Docker；普通实验重跑不需重启。
 

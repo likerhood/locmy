@@ -252,6 +252,7 @@ def main():
         manifest = {'dataset':args.dataset,'methods':args.methods,'instance_ids':[r['instance_id'] for r in samples],
             'hashes':hashes,'model':os.getenv('RQ4_MODEL',''),'endpoint_hash':hashlib.sha256(os.getenv('RQ4_BASE_URL','').encode()).hexdigest(),
             'api_direct':os.getenv('RQ4_API_DIRECT','').strip().lower() in ('1','true','yes'),
+            'github_direct':os.getenv('RQ4_GITHUB_DIRECT','1').strip().lower() in ('1','true','yes'),
             'protocol':protocol.get('name','legacy_test_fixture'),'test_timeout':args.test_timeout}
         existing = batch/'manifest.json'
         if existing.exists():

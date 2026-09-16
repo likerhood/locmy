@@ -10,24 +10,52 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 
+GITHUB_DIRECT_HOSTS = (
+    'github.com',
+    '.github.com',
+    'api.github.com',
+    'raw.githubusercontent.com',
+    'codeload.github.com',
+    'objects.githubusercontent.com',
+)
+
+
+def _enabled(name, default=''):
+    value = os.getenv(name, default).strip().lower()
+    if value not in ('', '0', 'false', 'no', '1', 'true', 'yes'):
+        raise ValueError(f'{name} must be true/false')
+    return value in ('1', 'true', 'yes')
+
+
+def _append_no_proxy(hosts):
+    for key in ('NO_PROXY', 'no_proxy'):
+        entries = [item.strip() for item in os.getenv(key, '').split(',') if item.strip()]
+        for host in hosts:
+            if host not in entries:
+                entries.append(host)
+        os.environ[key] = ','.join(entries)
+
 
 def configure_api_route():
     """Optionally bypass inherited proxies for only the configured API host."""
-    value = os.getenv('RQ4_API_DIRECT', '').strip().lower()
-    if value not in ('', '0', 'false', 'no', '1', 'true', 'yes'):
-        raise ValueError('RQ4_API_DIRECT must be true/false')
-    if value not in ('1', 'true', 'yes'):
+    if not _enabled('RQ4_API_DIRECT'):
         return None
     parsed = urlsplit(os.getenv('RQ4_BASE_URL', ''))
     if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
         raise ValueError('RQ4_API_DIRECT requires an HTTPS RQ4_BASE_URL without URL credentials')
     host = parsed.hostname
-    for key in ('NO_PROXY', 'no_proxy'):
-        entries = [item.strip() for item in os.getenv(key, '').split(',') if item.strip()]
-        if host not in entries:
-            entries.append(host)
-        os.environ[key] = ','.join(entries)
+    _append_no_proxy((host,))
     return host
+
+
+def configure_github_route():
+    """Make GitHub direct for this process and every pipeline child process."""
+    if not _enabled('RQ4_GITHUB_DIRECT', '1'):
+        return False
+    # An explicit direct route must win over inherited or file-based mirror settings.
+    os.environ['RQ4_GITHUB_MIRROR_PREFIX'] = ''
+    _append_no_proxy(GITHUB_DIRECT_HOSTS)
+    return True
 
 
 def load_env(path):
@@ -52,6 +80,7 @@ def load_env(path):
                     os.environ[target] = os.environ[source]
                     break
     configure_api_route()
+    configure_github_route()
 
 
 def main():

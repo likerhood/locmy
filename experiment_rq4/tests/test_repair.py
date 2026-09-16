@@ -107,13 +107,38 @@ class RepairTests(unittest.TestCase):
     def test_api_direct_adds_only_configured_host(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / '.env'
-            path.write_text('RQ4_BASE_URL=https://token.example.test/v1\nRQ4_API_DIRECT=1\n')
+            path.write_text('RQ4_BASE_URL=https://token.example.test/v1\nRQ4_API_DIRECT=1\nRQ4_GITHUB_DIRECT=0\n')
             with patch.dict(os.environ, {'HTTPS_PROXY': 'http://127.0.0.1:7890',
                                          'NO_PROXY': 'localhost'}, clear=True):
                 load_env(path)
                 self.assertEqual(os.environ['NO_PROXY'], 'localhost,token.example.test')
                 self.assertEqual(os.environ['no_proxy'], 'token.example.test')
                 self.assertEqual(os.environ['HTTPS_PROXY'], 'http://127.0.0.1:7890')
+
+    def test_github_direct_disables_mirror_and_reaches_pipeline_children(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / '.env'
+            path.write_text('RQ4_GITHUB_DIRECT=1\nRQ4_GITHUB_MIRROR_PREFIX=https://bad.example\n')
+            inherited = {
+                'HTTPS_PROXY': 'http://127.0.0.1:7890',
+                'NO_PROXY': 'localhost',
+                'RQ4_GITHUB_MIRROR_PREFIX': 'https://inherited.example',
+            }
+            with patch.dict(os.environ, inherited, clear=True):
+                load_env(path)
+                self.assertEqual(os.environ['RQ4_GITHUB_MIRROR_PREFIX'], '')
+                self.assertEqual(os.environ['HTTPS_PROXY'], 'http://127.0.0.1:7890')
+                for key in ('NO_PROXY', 'no_proxy'):
+                    entries = os.environ[key].split(',')
+                    self.assertIn('github.com', entries)
+                    self.assertIn('raw.githubusercontent.com', entries)
+                child = subprocess.check_output(
+                    [sys.executable, '-c',
+                     'import os; print(os.environ["RQ4_GITHUB_MIRROR_PREFIX"]); print(os.environ["NO_PROXY"])'],
+                    text=True,
+                ).splitlines()
+                self.assertEqual(child[0], '')
+                self.assertIn('github.com', child[1].split(','))
 
     def test_model_edits_accept_cosil_search_replace_and_json_fallback(self):
         self.assertEqual(parse_model_edits('{"edits": []}'), ([], 'json'))

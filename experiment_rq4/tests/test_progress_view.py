@@ -35,3 +35,14 @@ class ProgressTests(unittest.TestCase):
             result=tail(path)
             self.assertNotIn('secret',result['tail'])
             self.assertLessEqual(len(result['tail']),500)
+
+    def test_reads_repair_candidate_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);directory=root/'runs/pipeline/demo';batch=root/'runs/batches/demo'
+            log=batch/'attempts/magnet/case.log';log.parent.mkdir(parents=True)
+            log.write_text('[fine-localization] locations=3\n[repair-candidate] candidate=4/10 status=generated\n')
+            (batch/'manifest.json').write_text(json.dumps({'instance_ids':['case']}))
+            argv=['python','repair.py','--instance-id','case','--method','magnet']
+            with patch('progress_view.descendants',return_value=[(123,argv)]):
+                data=snapshot(root,directory,123)
+            self.assertIn('candidate=4/10',render(data))

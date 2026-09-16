@@ -45,6 +45,34 @@ def normalize_files(files):
     return result
 
 
+def nested(raw, field):
+    value = raw
+    for key in field.split('.'):
+        value = value[key]
+    return value
+
+
+def nested_optional(raw, field, default):
+    try:
+        return nested(raw, field)
+    except (KeyError, TypeError):
+        return default
+
+
+def normalize_functions(values, candidate_files):
+    if not isinstance(values, list) or any(not isinstance(x, str) for x in values):
+        raise ValueError('Predicted functions must be an ordered string list')
+    allowed = set(candidate_files[:15])
+    result = []
+    for value in values:
+        if '::' not in value:
+            continue
+        path = value.split('::', 1)[0].removeprefix('./')
+        if path in allowed and value not in result:
+            result.append(value.removeprefix('./'))
+    return result
+
+
 def main():
     (ROOT / 'manifests').mkdir(exist_ok=True)
     report = {'scope': 'provisional50; no environment controls executed', 'datasets': {}, 'predictions': []}
@@ -110,14 +138,19 @@ def main():
             for i in ids:
                 raw = selected.get(i)
                 if raw is None:
-                    output.append({'instance_id': i, 'found_files': [], 'status': 'missing_prediction'})
+                    output.append({'instance_id': i, 'found_files': [], 'found_functions': [],
+                                   'status': 'missing_prediction'})
                     continue
-                files = raw
-                for key in spec['field'].split('.'):
-                    files = files[key]
+                files = nested(raw, spec['field'])
                 if spec.get('item_key'):
                     files = [x[spec['item_key']] for x in files]
-                output.append({'instance_id': i, 'found_files': normalize_files(files), 'status': 'available'})
+                files = normalize_files(files)
+                functions = nested_optional(raw, spec['function_field'], []) if spec.get('function_field') else []
+                if spec.get('function_item_key'):
+                    functions = [x[spec['function_item_key']] for x in functions]
+                output.append({'instance_id': i, 'found_files': files,
+                               'found_functions': normalize_functions(functions, files),
+                               'status': 'available'})
             write_rows(target, output)
             report['predictions'].append({'dataset': tag, 'method': method, 'status': 'exported',
                 'source': str(path), 'source_sha256': digest(path), 'field': spec['field'],

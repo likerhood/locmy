@@ -37,6 +37,10 @@ def analyze(batch):
             usage = pred.get('usage') or {}
             row = {'method': method, 'instance_id': instance, 'status': record['status'],
                    'generated': bool(pred.get('model_patch')), 'applied_check': record.get('applied'),
+                   'fine_localization': pred.get('fine_localization_status'),
+                   'candidate_count': pred.get('candidate_count', 0),
+                   'unique_nonempty_patches': pred.get('unique_nonempty_patches', 0),
+                   'selected_candidate': pred.get('selected_candidate'),
                    'resolved': resolved, 'official_report': result is not None,
                    'seconds': record.get('elapsed_seconds', 0),
                    'prompt_tokens': usage.get('prompt_tokens', 0),
@@ -52,6 +56,8 @@ def analyze(batch):
                           'applied_check': sum(r['applied_check'] is True for r in method_rows),
                           'resolved': solved, 'unknown': unknown, 'resolved_percent_lower_bound': 100*solved/n,
                           'complete': unknown == 0, 'resolved_percent': 100*solved/n if unknown == 0 else None, 'total_tokens': sum(r['total_tokens'] for r in method_rows),
+                          'repair_candidates': sum(r['candidate_count'] for r in method_rows),
+                          'unique_nonempty_patches': sum(r['unique_nonempty_patches'] for r in method_rows),
                           'seconds': sum(r['seconds'] for r in method_rows)})
     paired = []
     if 'magnet' in manifest['methods']:
@@ -65,16 +71,17 @@ def analyze(batch):
                 counts[key] += 1
             paired.append({'baseline': method, **counts})
     report = {'manifest': manifest, 'summary': summaries, 'paired': paired,
-              'note': 'Token/time are this repair batch only, not end-to-end localization cost. Missing official evaluation stays unknown.'}
+              'note': 'Token/time include shared fine localization and repair candidates, but not the frozen upstream file/function localization cost. Missing official evaluation stays unknown.'}
     (batch / 'analysis.json').write_text(json.dumps(report, indent=2) + '\n')
     with (batch / 'per_instance.csv').open('w', newline='') as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     lines = ['# RQ4 batch analysis', '', 'Unknown means no final test conclusion; lower bound is NOT a completed resolved rate.', '',
-             '| Method | N | Generated | Applied check | Solved | Unknown | Resolved% | Tokens |', '|---|---:|---:|---:|---:|---:|---:|---:|']
+             '| Method | N | Generated | Candidates | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
+             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in summaries:
         rate = f'{r["resolved_percent"]:.2f}%' if r['complete'] else 'pending'
-        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
+        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["repair_candidates"]} | {r["unique_nonempty_patches"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
     lines += ['', 'Paired outcomes (unknown pairs excluded from win/loss counts):', '', '```json', json.dumps(paired, indent=2), '```']
     (batch / 'analysis.md').write_text('\n'.join(lines) + '\n')
     return report

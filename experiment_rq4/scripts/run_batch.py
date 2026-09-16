@@ -61,24 +61,31 @@ def generate_one(batch, args, sample):
     instance = sample['instance_id']
     for method in args.methods:
         record_path = batch/'records'/method/f'{instance}.json'
-        if record_path.exists():
+        record = json.loads(record_path.read_text()) if record_path.exists() else None
+        if record and record.get('status') == 'completed':
             print(f'Skip recorded attempt {method}/{instance}', flush=True)
+            continue
+        if record and record.get('status') == 'started' and 'note' not in record:
+            print(f'Skip legacy uncertain paid attempt {method}/{instance}; inspect before manual recovery', flush=True)
             continue
         # Retryable preparation is deliberately BEFORE the paid-attempt record.
         repo = repo_for(sample)
         ACTIVE_RESOURCES.ensure()
         out = batch/'attempts'/method/instance
-        if out.exists():
-            raise RuntimeError('Orphan attempt directory exists; inspect it before continuing')
         out.parent.mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
-        save(record_path, {'status':'started', 'instance_id':instance})
+        if record is None:
+            save(record_path, {'status':'started', 'instance_id':instance,
+                               'note':'Durable paid subcalls are resumable only when response and result both exist.'})
         command = [sys.executable, str(ROOT/'scripts/repair.py'), '--dataset', args.dataset,
                    '--method', method, '--instance-id', instance, '--repo', str(repo),
                    '--env-file', str(args.env_file.resolve()), '--output-dir', str(out), '--execute']
         with (out.parent/f'{instance}.log').open('w') as log:
+            protocol = json.loads((ROOT/'configs/protocol.json').read_text())
+            paid_calls = 1 + protocol.get('candidates_per_instance', 1)
+            request_timeout = int(os.getenv('RQ4_REQUEST_TIMEOUT','180'))
             ACTIVE_RESOURCES.run(command, stdout=log, stderr=subprocess.STDOUT,
-                                 timeout=int(os.getenv('RQ4_REQUEST_TIMEOUT','180'))+120)
+                                 timeout=(request_timeout + 30) * paid_calls + 120)
         prediction = read_rows(out/'prediction.jsonl')[0]
         ACTIVE_RESOURCES.run([sys.executable, str(ROOT/'scripts/check_patch.py'), '--run-dir', str(out)])
         applied = json.loads((out/'application_check.json').read_text())['applied']
@@ -169,9 +176,15 @@ def main():
             p.error('Incomplete prediction coverage; no paid calls started')
         source_paths.append(path)
     hashes = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
+    protocol = json.loads((ROOT/'configs/protocol.json').read_text())
     if args.mode == 'check':
+        calls_per_method = 1 + protocol.get('candidates_per_instance', 1)
         print(json.dumps({'dataset':args.dataset,'samples':len(samples),'methods':args.methods,
-            'planned_api_calls':len(samples)*len(args.methods),'api_configured':all(os.getenv(k) for k in ['RQ4_API_KEY','RQ4_MODEL','RQ4_BASE_URL']),
+            'planned_api_calls':len(samples)*len(args.methods)*calls_per_method,
+            'calls_per_sample_method':calls_per_method,
+            'fine_localization_calls':len(samples)*len(args.methods),
+            'repair_candidate_calls':len(samples)*len(args.methods)*protocol.get('candidates_per_instance', 1),
+            'api_configured':all(os.getenv(k) for k in ['RQ4_API_KEY','RQ4_MODEL','RQ4_BASE_URL']),
             'eval_dataset_exists':args.eval_dataset.exists(),'min_free_gb':args.min_free_gb,'image_cache':args.image_cache,
             'schedule':'repo_then_sample_then_method','status':'offline_check_no_calls'},indent=2))
         return
@@ -208,7 +221,7 @@ def main():
         manifest = {'dataset':args.dataset,'methods':args.methods,'instance_ids':[r['instance_id'] for r in samples],
             'hashes':hashes,'model':os.getenv('RQ4_MODEL',''),'endpoint_hash':hashlib.sha256(os.getenv('RQ4_BASE_URL','').encode()).hexdigest(),
             'api_direct':os.getenv('RQ4_API_DIRECT','').strip().lower() in ('1','true','yes'),
-            'protocol':'development_byte_budget_K1_serial_v2','test_timeout':args.test_timeout}
+            'protocol':protocol.get('name','legacy_test_fixture'),'test_timeout':args.test_timeout}
         existing = batch/'manifest.json'
         if existing.exists():
             previous = json.loads(existing.read_text())

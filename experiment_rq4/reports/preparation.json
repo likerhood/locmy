@@ -1,5 +1,5 @@
 {
-  "scope": "provisional50; no environment controls executed",
+  "scope": "provisional50; normalized ranked files plus upstream function locations; no environment controls executed",
   "datasets": {
     "swe": {
       "count": 50,
@@ -24,8 +24,9 @@
       "field": "found_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "ca13b4a47f07616b021c93e365b46d58fa55dad2c32cfcf6406a1c03082a03c9",
-      "model_identity": "directory/run label; provider identity audit pending"
+      "normalized_sha256": "e62e4ceafe8cc3a0e14de812a0c9617bcf3d25402b73e51f4dd3b51c37f0462e",
+      "model_identity": "directory/run label; provider identity audit pending",
+      "function_field": "found_functions"
     },
     {
       "dataset": "swe",
@@ -36,8 +37,9 @@
       "field": "found_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "3438872aa6ce8c2fea63ae129703332aa8de86f72635c7b7c4eb1a8930f96663",
-      "model_identity": "directory/run label; provider identity audit pending"
+      "normalized_sha256": "8f1354cf1fe0beca4de07b87877a46a6edbccb08f481b08ec08482d1cbeffaa3",
+      "model_identity": "directory/run label; provider identity audit pending",
+      "function_field": "found_functions"
     },
     {
       "dataset": "swe",
@@ -48,8 +50,9 @@
       "field": "final_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "cb97707acc61b74df5d5ae166b485007fb333e59ea71d23d3234a01eec9ca30d",
-      "model_identity": "directory/run label; provider identity audit pending"
+      "normalized_sha256": "f2c525d46119d594c9cce1f4ca32cb0440f7523ed3d7468f7973d5c99ac65fe8",
+      "model_identity": "directory/run label; provider identity audit pending",
+      "function_field": "final_functions"
     },
     {
       "dataset": "swe",
@@ -60,8 +63,9 @@
       "field": "found_files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "c3b13c17109b35c14fc0ac3f76287deeaaa251fee50cadaa95d9def98e23e0bc",
-      "model_identity": "directory/run label; provider identity audit pending"
+      "normalized_sha256": "37b2a3ef99c668b878bc62e9c755756d7059f00bfb4468b79da5e2f5c8c34940",
+      "model_identity": "directory/run label; provider identity audit pending",
+      "function_field": "found_functions"
     },
     {
       "dataset": "swe",
@@ -72,8 +76,9 @@
       "field": "ranked.files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "675debf2f00f207197dc2f6bb184e1b16bf8a3755fe459ad39027c777eb513c8",
-      "model_identity": "runtime API id xopqwen35397b; provider identity not independently verified"
+      "normalized_sha256": "1cbd766ebe82f0d598f3665ae7be40c9f212606efe7fc195e13692c8bf4bab3f",
+      "model_identity": "runtime API id xopqwen35397b; provider identity not independently verified",
+      "function_field": "ranked.functions"
     },
     {
       "dataset": "omni",
@@ -104,8 +109,9 @@
       "field": "ranked.files",
       "matched": 50,
       "count": 50,
-      "normalized_sha256": "d38a429cadcca1011354f878a509c8eb42edd22f7009504ec5f00f8db77dafc9",
-      "model_identity": "directory_label; provider identity audit pending"
+      "normalized_sha256": "5b710ec22f7d4b1640e0ae93712c4abed96bedfb5697c3d29f7bc2e813525e60",
+      "model_identity": "directory_label; provider identity audit pending",
+      "function_field": "ranked.functions"
     }
   ],
   "selection_revision": "swe50-v2-20260915"

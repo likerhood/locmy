@@ -7,7 +7,7 @@
 
 | 路径 | 用途 |
 |---|---|
-| `normalized/swe/*.jsonl` | 五种方法各 50 例定位输出，供修复读取 |
+| `normalized/swe/*.jsonl` | 五种方法各 50 例文件排序与函数定位输出，供细粒度定位和修复读取 |
 | `normalized/omni/magnet.jsonl` | 历史 Omni MAGNET 50 例；四个 baseline 尚缺 |
 | `data/inputs/*50.jsonl` | 修复任务输入，只有 ID、仓库、基础提交、问题描述 |
 | `data/evaluation_seed/*.jsonl.gz` | 隔离评测记录，含 gold；只供恢复评测数据，不进入修复提示词 |
@@ -51,7 +51,8 @@ RQ4_API_DIRECT=1
 # 无收费请求
 bash scripts/server_run.sh --mode check --dataset swe
 
-# 一例 MAGNET addtest3 + MiMo，会收费；只生成和检查补丁，不运行官方测试
+# 一例 MAGNET addtest3 + MiMo，会发起 1 次细粒度定位和 10 次候选修复请求；
+# 只生成、选择和检查补丁，不运行官方测试
 bash scripts/server_run.sh --mode generate --dataset swe --methods magnet --limit 1 --run-id swe-addtest3-mimo-api-smoke-v1
 ```
 
@@ -79,7 +80,10 @@ python3 scripts/verify_bundle.py
 - Rootless Docker 可能让镜像源码出现只有权限变化的 Git `M` 标记。RQ4 在官方 `eval.sh` 执行前，只在该测试容器的 `.git/config` 设置 `core.filemode=false`，并检查 `package.json` 没有内容差异；官方脚本、gold 和镜像内容保持原样。若检查失败会停止评测。此兼容处理需要新的 run-id，且仍须重新验证 no-op/gold 对照，不能把旧超时结果当作通过。
 - Automattic Calypso 的 Jest 日志中可能出现孤立的 `}`，锁定版本的官方解析器会把它误当作套件名，令所有测试 ID 多出 `} - ` 前缀。RQ4 只在所有已解析 ID 都带此前缀、去掉它后能完整覆盖该样本官方 F2P/P2P 名单时纠正判分用的 ID；原始 `test_output.txt`、状态和官方评测脚本保持不变。解析器兼容处理需要新的 run-id 和 no-op/gold 重验；不能把先前的 gold 对照失败改写为通过。
 - 某些 OpenAI 兼容模型即使被要求只返回 JSON，仍会先解释再给出单个 `json` Markdown 代码块。修复器接受纯 JSON，或且仅或一个可独立解析的 JSON 代码块；两者仍须严格满足唯一的 `edits` 字段。响应格式记录在 prediction 中，多代码块、额外字段和不可解析内容仍失败，不会自动重试收费请求。
-- 修复器为 Agentless-inspired 独立编辑器，不是官方 Agentless-1.5 原样运行。协议为完整文件、72,000 UTF-8 字节上限、单补丁、无反馈迭代。
+- 下游流程按 CoSIL RQ3 的结构适配到 MiMo：每种方法先保留最多 Top-15 文件及其上游函数排序，再执行一次共享的函数/行区间定位；修复上下文只包含这些区间及前后各 10 行。随后生成 10 个候选（1 个 temperature=0，9 个 temperature=0.8），按完全相同补丁去重和多数票确定性选择，最终只评测一个补丁。
+- `Top-15` 表示使用上游实际提供的前 15 名。CoSIL 历史快照只有 5 个文件、GALA 某些样本少于 15 个时，程序使用全部已有项，不补造排名。每条 `normalized` 记录同时保存 `found_files` 和 `found_functions`；上游函数为空时，共享细粒度定位阶段从候选文件函数定义清单中选择。
+- 这不是逐字复刻 CoSIL 的 `patch_gen.sh`：模型改为 MiMo，输出采用严格 JSON search/replace；候选选择使用去重多数票，不运行 CoSIL 的模型生成 reproduction/regression 测试，避免额外测试生成质量成为五种定位方法之间的混杂变量。no-op/gold 对照和最终官方 SWE-bench 测试保持不变。
+- 每个样本方法最多产生 11 次收费请求，所以 1 样本 × 5 方法最多 55 次，50 样本 × 5 方法最多 2750 次。`--mode check` 会在收费前打印精确计划数。每次请求独立记录在 `attempts/<method>/<instance>/paid_calls/`；只有完整响应可自动复用，结果不确定的请求不会自动重发。
 - Omni 最新结果尚未齐备，本包不宣称能完成两个数据集的正式实验。
 - 更新定位输入或模型后使用新 run-id，不混用旧结果。
 

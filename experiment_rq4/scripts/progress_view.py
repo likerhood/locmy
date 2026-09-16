@@ -88,6 +88,8 @@ def snapshot(root, directory, pid):
             candidates=[p for p in candidates if instance in str(p.relative_to(folder)) or p.name=='harness.log']
     elif stage=='Pulling test image': candidates=[batch/'image_pull.log']
     elif stage=='Installing evaluation dependencies': candidates=[root/'reports/setup/pip.log']
+    elif stage=='Generating patch' and instance and method:
+        candidates=[batch/'attempts'/method/f'{instance}.log']
     # Model response files are deliberately not echoed.
     entries=[v for p in candidates if (v:=tail(p))]
     data['logs']=sorted(entries,key=lambda x:x['age_seconds'])[:2]
@@ -107,7 +109,7 @@ def render(data, previous=None):
         if not seen:
             snippet=' '.join(item['tail'].split())
             # Full paths and full output remain in status.json and the original log.
-            snippet=re.sub(r'(?:/|logs/)[^\s|]+', '[path]', snippet)
+            snippet=re.sub(r'(?:/[A-Za-z0-9_.-]+){2,}[^\s|]*|logs/[^\s|]+', '[path]', snippet)
             lines.append('  latest: '+snippet[:180]+('...' if len(snippet)>180 else ''))
     if not logs:
         lines.append('  No step log yet. Process liveness does not prove progress.')

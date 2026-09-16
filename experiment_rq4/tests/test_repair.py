@@ -9,7 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from repair import apply_edits, make_patch, parse_model_edits, validate_path
+from repair import (apply_edits, choose_candidate, line_evidence, localized_context,
+                    make_patch, parse_locations, parse_model_edits, validate_path)
 from preflight import load_env
 
 
@@ -51,6 +52,25 @@ class RepairTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_model_edits('{"edits": [], "extra": true}')
 
+    def test_function_line_localization_contract_and_context(self):
+        files = {'a.js': 'const one = 1;\nfunction target() {\n  return one;\n}\n'}
+        evidence = line_evidence(files, ['a.js::function:target'], radius=1)
+        self.assertEqual(evidence['a.js']['upstream_functions'], ['target'])
+        locations, fmt = parse_locations(
+            '```json\n{"locations":[{"path":"a.js","function":"target","start_line":2,"end_line":4}]}\n```', files)
+        self.assertEqual(fmt, 'single_json_fence')
+        self.assertIn('function target()', localized_context(files, locations, 1)['a.js'])
+        with self.assertRaises(ValueError):
+            parse_locations('{"locations":[{"path":"a.js","function":"x","start_line":0,"end_line":4}]}', files)
+
+    def test_candidate_vote_deduplicates_and_is_deterministic(self):
+        candidates = [
+            {'candidate_index': 0, 'status': 'generated', 'model_patch': 'a'},
+            {'candidate_index': 1, 'status': 'generated', 'model_patch': 'b'},
+            {'candidate_index': 2, 'status': 'generated', 'model_patch': 'b'},
+        ]
+        self.assertEqual(choose_candidate(candidates)['candidate_index'], 1)
+
     def test_ambiguous_and_outside_edits(self):
         for edit in [{'path': 'a.js', 'search': 'x', 'replace': 'y'},
                      {'path': 'b.js', 'search': 'x', 'replace': 'y'}]:
@@ -83,7 +103,7 @@ class RepairTests(unittest.TestCase):
             rows = [json.loads(x) for x in path.read_text().splitlines()]
             self.assertEqual(len(rows), 50)
             for row in rows:
-                self.assertEqual(set(row), {'instance_id', 'found_files', 'status'})
+                self.assertEqual(set(row), {'instance_id', 'found_files', 'found_functions', 'status'})
 
 
 if __name__ == '__main__':

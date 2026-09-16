@@ -50,7 +50,8 @@ def main():
         require(hashlib.sha256(p.read_bytes()).hexdigest() == item['normalized_sha256'], f'{label}: prediction hash mismatch')
         rows = [json.loads(x) for x in p.read_text().splitlines()]
         require([r['instance_id'] for r in rows] == ids_by_tag[item['dataset']], f'{label}: IDs/order mismatch')
-        require(all(set(r) == {'instance_id', 'found_files', 'status'} for r in rows), f'{label}: unexpected fields')
+        require(all(set(r) == {'instance_id', 'found_files', 'found_functions', 'status'} for r in rows), f'{label}: unexpected fields')
+        require(all(isinstance(r['found_functions'], list) for r in rows), f'{label}: invalid function locations')
         exported.append(label)
     print(json.dumps({'bundle_integrity': 'ok', 'exported': exported,
                       'missing_localization': missing,

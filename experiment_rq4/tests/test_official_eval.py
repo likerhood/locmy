@@ -92,6 +92,25 @@ class OfficialEvalTests(unittest.TestCase):
         self.assertEqual(result['unrelated parser output'], 'FAILED')
         self.assertNotIn('} - selectors - #getCountriesWithStates - returns countries', result)
 
+    def test_calypso_displaced_outer_suite_is_normalized(self):
+        spec = SimpleNamespace(
+            instance_id='Automattic__wp-calypso-21409',
+            FAIL_TO_PASS=[
+                'selectors - #getCountriesWithStates - should return countries',
+            ],
+            PASS_TO_PASS=[
+                'selectors - #getStates - should return states',
+            ],
+        )
+        parsed = {
+            '} - #getCountriesWithStates - should return countries': 'PASSED',
+            'return request( siteId ) - #getStates - should return states': 'PASSED',
+        }
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = parse_calypso_without_stray_brace('', spec, lambda *_: parsed)
+        self.assertEqual(set(result), set(spec.FAIL_TO_PASS + spec.PASS_TO_PASS))
+        self.assertTrue(all(status == 'PASSED' for status in result.values()))
+
     def test_calypso_ambiguous_suffix_is_not_normalized(self):
         spec = SimpleNamespace(
             instance_id='Automattic__wp-calypso-21409',

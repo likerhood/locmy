@@ -12,8 +12,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from repair import (LOCALIZATION_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, api_call, apply_edits,
-                    choose_candidate, line_evidence, localized_context, make_patch,
-                    parse_locations, parse_model_edits, validate_path)
+                    changed_line_count, choose_candidate, line_evidence, localized_context,
+                    make_patch, normalized_patch_key, parse_locations, parse_model_edits,
+                    SEARCH_MARKER, DIVIDER_MARKER, REPLACE_MARKER, validate_path,
+                    validate_updated_files)
 from preflight import load_env
 
 
@@ -32,27 +34,34 @@ class RepairTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env, clear=True):
             error = urllib.error.HTTPError('https://api.example', 500, 'Internal', {}, None)
             with patch('urllib.request.urlopen', side_effect=[error, Response()]) as request:
-                result, _ = api_call(Path(tmp) / 'http', [], 0, 10)
+                result, _ = api_call(Path(tmp) / 'http', [], 0, 10, 0.95)
             self.assertEqual(request.call_count, 2)
             self.assertEqual(result['http_attempt_count'], 2)
             attempt = json.loads((Path(tmp) / 'http/attempt.json').read_text())
             self.assertEqual(attempt['http_failures'][0]['http_status'], 500)
+            self.assertEqual(attempt['top_p'], 0.95)
 
             with patch('urllib.request.urlopen', side_effect=urllib.error.URLError('reset')) as request:
                 with self.assertRaises(urllib.error.URLError):
                     api_call(Path(tmp) / 'connection', [], 0, 10)
             self.assertEqual(request.call_count, 1)
 
-    def test_prompts_are_english_and_state_strict_output_contracts(self):
-        for prompt, key in [(LOCALIZATION_SYSTEM_PROMPT, 'locations'),
-                            (REPAIR_SYSTEM_PROMPT, 'edits')]:
-            self.assertTrue(prompt.isascii())
-            self.assertIn('exactly one valid JSON object', prompt)
-            self.assertIn(f'only the {key} key', prompt)
-            self.assertIn('Never return an empty response', prompt)
+    def test_prompts_are_english_and_state_output_contracts(self):
+        self.assertTrue(LOCALIZATION_SYSTEM_PROMPT.isascii())
+        self.assertIn('exactly one valid JSON object', LOCALIZATION_SYSTEM_PROMPT)
+        self.assertIn('only the locations key', LOCALIZATION_SYSTEM_PROMPT)
+        self.assertTrue(REPAIR_SYSTEM_PROMPT.isascii())
+        self.assertIn('SEARCH/REPLACE', REPAIR_SYSTEM_PROMPT)
+        self.assertIn('reason about the root cause', REPAIR_SYSTEM_PROMPT)
+        self.assertIn('NO_VALID_EDIT', REPAIR_SYSTEM_PROMPT)
 
         protocol = json.loads((ROOT / 'configs/protocol.json').read_text())
-        self.assertEqual(protocol['prompt_contract'], 'strict_english_json_v2')
+        self.assertEqual(protocol['prompt_contract'], 'english_cosil_search_replace_v3')
+        self.assertEqual(protocol['localization_temperature'], 0.8)
+        self.assertEqual(protocol['localization_top_p'], 1.0)
+        self.assertEqual(protocol['greedy_top_p'], 1.0)
+        self.assertEqual(protocol['sampling_top_p'], 1.0)
+        self.assertIn('official F2P/P2P', protocol['rerank_test_policy'])
         self.assertGreaterEqual(protocol['localization_max_output_tokens'], 8192)
         self.assertGreaterEqual(protocol['sampling_max_output_tokens'], 8192)
 
@@ -84,11 +93,24 @@ class RepairTests(unittest.TestCase):
                 self.assertEqual(os.environ['no_proxy'], 'token.example.test')
                 self.assertEqual(os.environ['HTTPS_PROXY'], 'http://127.0.0.1:7890')
 
-    def test_model_edits_accept_strict_or_single_fenced_json(self):
+    def test_model_edits_accept_cosil_search_replace_and_json_fallback(self):
         self.assertEqual(parse_model_edits('{"edits": []}'), ([], 'json'))
+        self.assertEqual(parse_model_edits('NO_VALID_EDIT'), ([], 'no_valid_edit'))
         content = 'Explanation before.\n```json\n{"edits": []}\n```\n'
         self.assertEqual(parse_model_edits(content), ([], 'single_json_fence'))
-        with self.assertRaises(json.JSONDecodeError):
+        content = f'''Reasoning first.\n```python
+### src/a.js
+{SEARCH_MARKER}
+const value = 1;
+{DIVIDER_MARKER}
+const value = 2;
+{REPLACE_MARKER}
+```'''
+        edits, response_format = parse_model_edits(content)
+        self.assertEqual(response_format, 'cosil_search_replace')
+        self.assertEqual(edits, [{'path': 'src/a.js', 'search': 'const value = 1;',
+                                  'replace': 'const value = 2;'}])
+        with self.assertRaises(ValueError):
             parse_model_edits('```json\n{"edits": []}\n```\n```json\n{"edits": []}\n```')
         with self.assertRaises(ValueError):
             parse_model_edits('{"edits": [], "extra": true}')
@@ -108,11 +130,35 @@ class RepairTests(unittest.TestCase):
 
     def test_candidate_vote_deduplicates_and_is_deterministic(self):
         candidates = [
-            {'candidate_index': 0, 'status': 'generated', 'model_patch': 'a'},
-            {'candidate_index': 1, 'status': 'generated', 'model_patch': 'b'},
-            {'candidate_index': 2, 'status': 'generated', 'model_patch': 'b'},
+            {'candidate_index': 0, 'status': 'generated', 'model_patch': 'a',
+             'normalized_patch_sha256': 'a', 'changed_lines': 4,
+             'validation': {'status': 'passed'}},
+            {'candidate_index': 1, 'status': 'generated', 'model_patch': 'b',
+             'normalized_patch_sha256': 'b', 'changed_lines': 2,
+             'validation': {'status': 'passed'}},
+            {'candidate_index': 2, 'status': 'generated', 'model_patch': 'c',
+             'normalized_patch_sha256': 'b', 'changed_lines': 3,
+             'validation': {'status': 'passed'}},
         ]
         self.assertEqual(choose_candidate(candidates)['candidate_index'], 1)
+
+    def test_candidate_validation_normalization_and_localized_scope(self):
+        original = {'a.py': 'def f():\n    return 1\n', 'data.json': '{"a": 1}\n'}
+        updated = {'a.py': 'def f():\n    return 2\n', 'data.json': '{"a": 1}\n'}
+        validation = validate_updated_files(original, updated)
+        self.assertEqual(validation['status'], 'passed')
+        self.assertEqual(validation['syntax_checked_files'], ['a.py'])
+        key = normalized_patch_key(original, updated)
+        whitespace = {'a.py': 'def f():  \r\n    return 2\r\n', 'data.json': '{"a": 1}\n'}
+        self.assertEqual(key, normalized_patch_key(original, whitespace))
+        patch = make_patch(original, updated)
+        self.assertEqual(changed_line_count(patch), 2)
+        with self.assertRaises(SyntaxError):
+            validate_updated_files(original, {'a.py': 'def f(:\n', 'data.json': '{"a": 1}\n'})
+        with self.assertRaises(ValueError):
+            apply_edits({'a.py': 'x = 1\ny = 2\n'},
+                        [{'path': 'a.py', 'search': 'y = 2', 'replace': 'y = 3'}],
+                        visible={'a.py': 'x = 1'})
 
     def test_ambiguous_and_outside_edits(self):
         for edit in [{'path': 'a.js', 'search': 'x', 'replace': 'y'},

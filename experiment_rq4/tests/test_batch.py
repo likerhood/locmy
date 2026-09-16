@@ -20,7 +20,10 @@ class BatchTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             put(root/'manifest.json',{'methods':['magnet','locagent'],'instance_ids':['a','b','c']})
-            put(root/'records/magnet/a.json',{'status':'completed','prediction':{'model_patch':'diff','usage':{'total_tokens':12}}})
+            put(root/'records/magnet/a.json',{'status':'completed','prediction':{
+                'model_patch':'diff','candidate_count':10,'valid_candidate_count':7,
+                'candidate_outcomes':{'generated':7,'failed:response_parse':3},
+                'unique_nonempty_patches':5,'usage':{'total_tokens':12}}})
             put(root/'records/magnet/b.json',{'status':'completed','prediction':{'model_patch':''}})
             put(root/'evaluation/magnet/a/report.json',{'a':{'resolved':True}})
             put(root/'evaluation/locagent/a/report.json',{'a':{'resolved':False}})
@@ -28,6 +31,10 @@ class BatchTests(unittest.TestCase):
             self.assertEqual(result['summary'][0]['n'],3)
             self.assertEqual(result['summary'][0]['resolved'],1)
             self.assertEqual(result['summary'][0]['unknown'],1)
+            self.assertEqual(result['summary'][0]['repair_candidates'],10)
+            self.assertEqual(result['summary'][0]['valid_repair_candidates'],7)
+            self.assertEqual(result['summary'][0]['candidate_outcomes'],
+                             {'generated':7,'failed:response_parse':3})
             self.assertEqual(result['paired'][0]['ours_only'],1)
             self.assertEqual(result['paired'][0]['unknown'],2)
 

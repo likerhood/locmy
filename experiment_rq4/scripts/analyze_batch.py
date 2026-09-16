@@ -35,10 +35,13 @@ def analyze(batch):
             if result is None and record.get('status') == 'completed' and not pred.get('model_patch') and pred.get('status') in (None, 'empty_patch'):
                 resolved = False
             usage = pred.get('usage') or {}
+            candidate_outcomes = pred.get('candidate_outcomes') or {}
             row = {'method': method, 'instance_id': instance, 'status': record['status'],
                    'generated': bool(pred.get('model_patch')), 'applied_check': record.get('applied'),
                    'fine_localization': pred.get('fine_localization_status'),
                    'candidate_count': pred.get('candidate_count', 0),
+                   'valid_candidate_count': pred.get('valid_candidate_count', 0),
+                   'candidate_outcomes': json.dumps(candidate_outcomes, sort_keys=True),
                    'unique_nonempty_patches': pred.get('unique_nonempty_patches', 0),
                    'selected_candidate': pred.get('selected_candidate'),
                    'resolved': resolved, 'official_report': result is not None,
@@ -52,11 +55,17 @@ def analyze(batch):
         n = len(method_rows)
         solved = sum(r['resolved'] is True for r in method_rows)
         unknown = sum(r['resolved'] is None for r in method_rows)
+        method_candidate_outcomes = {}
+        for row in method_rows:
+            for key, value in json.loads(row['candidate_outcomes']).items():
+                method_candidate_outcomes[key] = method_candidate_outcomes.get(key, 0) + value
         summaries.append({'method': method, 'n': n, 'generated': sum(r['generated'] for r in method_rows),
                           'applied_check': sum(r['applied_check'] is True for r in method_rows),
                           'resolved': solved, 'unknown': unknown, 'resolved_percent_lower_bound': 100*solved/n,
                           'complete': unknown == 0, 'resolved_percent': 100*solved/n if unknown == 0 else None, 'total_tokens': sum(r['total_tokens'] for r in method_rows),
                           'repair_candidates': sum(r['candidate_count'] for r in method_rows),
+                          'valid_repair_candidates': sum(r['valid_candidate_count'] for r in method_rows),
+                          'candidate_outcomes': method_candidate_outcomes,
                           'unique_nonempty_patches': sum(r['unique_nonempty_patches'] for r in method_rows),
                           'seconds': sum(r['seconds'] for r in method_rows)})
     paired = []
@@ -77,11 +86,13 @@ def analyze(batch):
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     lines = ['# RQ4 batch analysis', '', 'Unknown means no final test conclusion; lower bound is NOT a completed resolved rate.', '',
-             '| Method | N | Generated | Candidates | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
-             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+             '| Method | N | Generated | Candidates | Valid candidates | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
+             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in summaries:
         rate = f'{r["resolved_percent"]:.2f}%' if r['complete'] else 'pending'
-        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["repair_candidates"]} | {r["unique_nonempty_patches"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
+        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["repair_candidates"]} | {r["valid_repair_candidates"]} | {r["unique_nonempty_patches"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
+    lines += ['', 'Candidate outcomes (generated, empty, or failed stage):', '', '```json',
+              json.dumps({r['method']: r['candidate_outcomes'] for r in summaries}, indent=2), '```']
     lines += ['', 'Paired outcomes (unknown pairs excluded from win/loss counts):', '', '```json', json.dumps(paired, indent=2), '```']
     (batch / 'analysis.md').write_text('\n'.join(lines) + '\n')
     return report

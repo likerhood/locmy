@@ -1,20 +1,32 @@
 {
-  "name": "cosil_rq3_aligned_top15_k10_v2",
+  "name": "cosil_rq3_repair_top15_k10_v4",
   "localization_model_label": "Qwen3.5-397B-A17B",
   "file_top_k": 15,
   "localization_excerpt_radius": 18,
   "max_symbol_excerpts_per_file": 12,
-  "localization_temperature": 0,
+  "localization_temperature": 0.8,
+  "localization_top_p": 1.0,
   "localization_max_output_tokens": 8192,
   "context_window": 10,
   "candidates_per_instance": 10,
   "greedy_temperature": 0,
+  "greedy_top_p": 1.0,
   "greedy_max_output_tokens": 8192,
   "sampling_temperature": 0.8,
+  "sampling_top_p": 1.0,
   "sampling_max_output_tokens": 8192,
   "max_code_utf8_bytes": 72000,
-  "candidate_selection": "exact_patch_dedup_then_frequency_then_lowest_index",
+  "repair_output_format": "cosil_search_replace_with_reasoning",
+  "candidate_validation": [
+    "localized_scope",
+    "unique_search",
+    "nonempty_change",
+    "python_ast_or_json_parse_when_applicable"
+  ],
+  "candidate_normalization": "changed_content_eol_and_trailing_whitespace_v1",
+  "candidate_selection": "validated_normalized_vote_then_smallest_change_then_lowest_index",
   "status": "formal_candidate_protocol",
-  "prompt_contract": "strict_english_json_v2",
-  "notes": "CoSIL RQ3 aligned adaptation: upstream ranked files/functions, shared fine function+line localization, 1 greedy + 9 stochastic repair candidates, deterministic dedup/vote, and one final official evaluation. Fine localization and every repair candidate receive an 8192-token output budget so reasoning does not consume the entire response before final JSON. Top-15 means up to 15 available ranked files; no rank is fabricated. MiMo JSON search/replace is retained for strict parsing. Reproduction/regression candidate tests are not used, avoiding generated-test confounding across localization methods."
+  "prompt_contract": "english_cosil_search_replace_v3",
+  "rerank_test_policy": "candidate-independent generated tests are not yet available for this dataset; official F2P/P2P tests are never used for candidate selection",
+  "notes": "CoSIL RQ3 downstream repair alignment for a localization comparison: upstream ranked files/functions, one stochastic fine function+line localization, shared localized context, one greedy plus nine stochastic repair candidates, CoSIL-style reasoning and SEARCH/REPLACE output, localized-scope and exact-application validation, language-aware syntax validation where deterministic standard-library parsers exist, changed-content normalization, deterministic majority reranking, and one final official evaluation. Top-15 means up to 15 available ranked files; no rank is fabricated. Sampling geometry is frozen explicitly: top_p=1.0 for localization and all repair candidates. Output budgets remain 8192 for Qwen3.5 reasoning compatibility. Original CoSIL requested 20 repair samples but its public reranking path consumed only candidates 0-9; this protocol directly generates those 10 effective candidates and avoids 10 paid discarded responses. The original CoSIL generated reproduction/regression reranker is not imitated with official benchmark tests because that would leak final evaluation evidence; its absence is explicit in rerank_test_policy."
 }

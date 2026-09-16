@@ -20,6 +20,40 @@ from preflight import load_env
 
 ROOT = Path(__file__).resolve().parents[1]
 
+LOCALIZATION_SYSTEM_PROMPT = """You are the fine-grained localization stage of a software repair system.
+Identify the smallest defensible function and line intervals that must be inspected or edited to solve the issue.
+
+Return exactly one valid JSON object with this schema:
+{"locations":[{"path":"relative/path.ext","function":"symbol or scope name","start_line":1,"end_line":2}]}
+
+Rules:
+- Use only file paths supplied in file_localization.
+- Line numbers are 1-based, inclusive, and must exist in the supplied evidence.
+- Prefer narrow intervals that contain the likely fault and enough surrounding context to edit it.
+- Use upstream function evidence when it is relevant, but do not invent symbols or paths.
+- Do not return prose, analysis, comments, Markdown, or code fences.
+- Use double-quoted JSON strings and escape embedded newlines and quotes correctly.
+- Never return an empty response. If no defensible location exists, return {"locations":[]}.
+- Before answering, verify that the output is syntactically valid JSON and contains only the locations key."""
+
+REPAIR_SYSTEM_PROMPT = """You are the patch-generation stage of a software repair system.
+Fix the reported issue using only the supplied localized code from existing files.
+
+Return exactly one valid JSON object with this schema:
+{"edits":[{"path":"relative/path.ext","search":"exact existing text","replace":"replacement text"}]}
+
+Rules:
+- Use only paths present in localized_code. Do not create, rename, or delete files.
+- Every search value must be copied exactly from localized_code and must match exactly once.
+- Include enough unchanged surrounding text in search to make the match unique.
+- Preserve indentation, syntax, and project conventions in replace.
+- Make the smallest complete change that addresses the issue; avoid unrelated cleanup.
+- Multiple edits are allowed when the fix requires them.
+- Do not return prose, analysis, comments, Markdown, or code fences.
+- Use double-quoted JSON strings and escape embedded newlines, tabs, backslashes, and quotes correctly.
+- Never return an empty response. If no valid edit can be made, return {"edits":[]}.
+- Before answering, verify that the output is syntactically valid JSON, contains only the edits key, and that every search string appears exactly once in the supplied code."""
+
 
 def save(path, value, jsonl=False):
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -267,7 +301,7 @@ def main():
     localization_payload = {'issue': sample['problem_statement'], 'file_localization': list(original),
         'upstream_function_localization': loc.get('found_functions', []), 'evidence': evidence}
     localization_messages = [
-        {'role': 'system', 'content': 'Select functions and exact line intervals likely to require edits. Use only supplied paths and valid line numbers. Return ONLY JSON: {"locations":[{"path":"...","function":"...","start_line":1,"end_line":2}]}. No prose.'},
+        {'role': 'system', 'content': LOCALIZATION_SYSTEM_PROMPT},
         {'role': 'user', 'content': json.dumps(localization_payload, ensure_ascii=False)}]
     save(run_dir/'request.json', {'protocol': protocol, 'base_commit': sample['base_commit'],
         'candidate_files': list(original), 'upstream_functions': loc.get('found_functions', []),
@@ -312,7 +346,7 @@ def main():
     candidates = []
     if contexts:
         repair_messages = [
-            {'role': 'system', 'content': 'Fix the issue using only the localized existing code. Return ONLY JSON: {"edits":[{"path":"...","search":"exact unique existing text","replace":"replacement text"}]}. No prose or markdown. Search text must be exact. No new files. Return {"edits":[]} only when no valid change is possible.'},
+            {'role': 'system', 'content': REPAIR_SYSTEM_PROMPT},
             {'role': 'user', 'content': json.dumps({'issue': sample['problem_statement'],
                 'file_localization': list(original), 'function_and_line_localization': locations,
                 'localized_code': contexts}, ensure_ascii=False)}]

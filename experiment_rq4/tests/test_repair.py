@@ -9,12 +9,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from repair import (apply_edits, choose_candidate, line_evidence, localized_context,
-                    make_patch, parse_locations, parse_model_edits, validate_path)
+from repair import (LOCALIZATION_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, apply_edits,
+                    choose_candidate, line_evidence, localized_context, make_patch,
+                    parse_locations, parse_model_edits, validate_path)
 from preflight import load_env
 
 
 class RepairTests(unittest.TestCase):
+    def test_prompts_are_english_and_state_strict_output_contracts(self):
+        for prompt, key in [(LOCALIZATION_SYSTEM_PROMPT, 'locations'),
+                            (REPAIR_SYSTEM_PROMPT, 'edits')]:
+            self.assertTrue(prompt.isascii())
+            self.assertIn('exactly one valid JSON object', prompt)
+            self.assertIn(f'only the {key} key', prompt)
+            self.assertIn('Never return an empty response', prompt)
+
     def test_mycode_env_aliases_and_override(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / '.env'

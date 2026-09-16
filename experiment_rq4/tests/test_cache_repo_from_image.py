@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from cache_repo_from_image import verify_git
+from cache_repo_from_image import has_commit, import_commit, verify_git
 
 
 class ImageRepoCacheTests(unittest.TestCase):
@@ -28,6 +28,30 @@ class ImageRepoCacheTests(unittest.TestCase):
                 verify_git(cache, commit, ['missing.js'])
             with self.assertRaises(RuntimeError):
                 verify_git(cache, '0' * 40, ['selected.js'])
+
+    def test_imports_missing_commit_into_existing_cache(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'source'
+            subprocess.run(['git', 'init', '-q', str(source)], check=True)
+            subprocess.run(['git', '-C', str(source), 'config', 'user.email', 'test@example.invalid'], check=True)
+            subprocess.run(['git', '-C', str(source), 'config', 'user.name', 'Test'], check=True)
+            (source / 'selected.js').write_text('const answer = 1;\n')
+            subprocess.run(['git', '-C', str(source), 'add', 'selected.js'], check=True)
+            subprocess.run(['git', '-C', str(source), 'commit', '-qm', 'first'], check=True)
+            first = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
+
+            target = root / 'target'
+            subprocess.run(['git', 'clone', '-q', '--no-checkout', str(source), str(target)], check=True)
+            (source / 'selected.js').write_text('const answer = 2;\n')
+            subprocess.run(['git', '-C', str(source), 'commit', '-qam', 'second'], check=True)
+            second = subprocess.check_output(['git', '-C', str(source), 'rev-parse', 'HEAD'], text=True).strip()
+
+            self.assertTrue(has_commit(target, first))
+            self.assertFalse(has_commit(target, second))
+            import_commit(target, source / '.git', second)
+            self.assertTrue(has_commit(target, second))
+            self.assertEqual(verify_git(target, second, ['selected.js']), 'selected.js')
 
 
 if __name__ == '__main__':

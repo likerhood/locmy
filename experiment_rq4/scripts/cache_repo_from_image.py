@@ -37,6 +37,20 @@ def verify_git(path, commit, candidate_paths):
     raise RuntimeError('Image Git objects contain no selected repair input at the frozen commit')
 
 
+def has_commit(path, commit):
+    return subprocess.run(
+        ['git', '-C', str(path), 'cat-file', '-e', commit + '^{commit}'],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+
+
+def import_commit(target, source_git, commit):
+    """Copy one verified commit's reachable objects into an existing cache."""
+    run(['git', '-C', str(target), 'fetch', '--no-tags', str(source_git), commit])
+    if not has_commit(target, commit):
+        raise RuntimeError('Pinned image object import did not provide the frozen commit')
+
+
 def selected_paths(dataset, instance):
     paths = []
     for method in ('locagent', 'cosil', 'gala', 'graphlocator', 'magnet'):
@@ -82,10 +96,13 @@ def cache(run_id, instance):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
             raise RuntimeError('Repository cache is in use by another batch') from exc
-        if target.exists():
-            verified = verify_git(target, commit, candidates)
-            print(f'Existing cache verified: {target}; file={verified}')
-            return
+        augment = target.exists()
+        if augment:
+            run(['git', '-C', str(target), 'rev-parse', '--git-dir'])
+            if has_commit(target, commit):
+                verified = verify_git(target, commit, candidates)
+                print(f'Existing cache verified: {target}; file={verified}')
+                return
         temporary = Path(tempfile.mkdtemp(prefix='.rq4-image-', dir=repo_dir))
         container = None
         try:
@@ -94,13 +111,26 @@ def cache(run_id, instance):
             run(['docker', 'cp', f'{container}:/testbed/.git', str(temporary / '.git')])
             print('[image-cache] Verifying frozen commit and repair input.', flush=True)
             verified = verify_git(temporary, commit, candidates)
-            (temporary / '.rq4-source.json').write_text(json.dumps({
+            audit = {
                 'source': 'pinned_evaluation_image_git_objects', 'image': image,
                 'repo': repo, 'base_commit': commit, 'verified_file': verified,
                 'run_id': run_id, 'imported_at': datetime.now(timezone.utc).isoformat(),
-            }, indent=2) + '\n')
-            os.rename(temporary, target)
-            print(f'Image Git cache ready: {target}; commit={commit}; file={verified}')
+            }
+            if augment:
+                print('[image-cache] Importing the missing commit into the existing cache.', flush=True)
+                import_commit(target, temporary / '.git', commit)
+                verified = verify_git(target, commit, candidates)
+                audit_path = target / '.rq4-source.json'
+                previous = json.loads(audit_path.read_text()) if audit_path.exists() else {}
+                imports = previous.get('image_object_imports', [])
+                imports.append(audit)
+                previous['image_object_imports'] = imports
+                audit_path.write_text(json.dumps(previous, indent=2) + '\n')
+                print(f'Existing cache augmented: {target}; commit={commit}; file={verified}')
+            else:
+                (temporary / '.rq4-source.json').write_text(json.dumps(audit, indent=2) + '\n')
+                os.rename(temporary, target)
+                print(f'Image Git cache ready: {target}; commit={commit}; file={verified}')
         finally:
             if container:
                 subprocess.run(['docker', 'rm', container], stdout=subprocess.DEVNULL,

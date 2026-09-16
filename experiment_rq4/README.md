@@ -79,7 +79,7 @@ python3 scripts/verify_bundle.py
 
 - 已有串行调度与空间监测，默认预留 10 GiB；50 GB 下仍需单例实测环境峰值，详见新部署说明。
 - 完整评测仍需官方元数据兼容性、Docker 与 gold/no-op 对照验证；所选模型接口需要实际试跑。
-- Rootless Docker 可能让镜像源码出现只有权限变化的 Git `M` 标记。RQ4 在官方 `eval.sh` 执行前，只在该测试容器的 `.git/config` 设置 `core.filemode=false`，并检查 `package.json` 没有内容差异；官方脚本、gold 和镜像内容保持原样。若检查失败会停止评测。此兼容处理需要新的 run-id，且仍须重新验证 no-op/gold 对照，不能把旧超时结果当作通过。
+- Rootless Docker 可能让镜像源码出现只有权限变化的 Git `M` 标记。RQ4 在官方 `eval.sh` 执行前，只在该测试容器的 `.git/config` 设置 `core.filemode=false`。锁定的 evaluator 压缩快照保持逐字节不变用于来源审计；生成本地 evaluation-only 数据时，一个严格匹配的适配器会删除其中对 `node_modules` 的冗余递归 `chmod`，因为锁定 harness 以 root 运行，而该元数据改写会在 overlay2 上耗尽超时。依赖安装仍只在 `package.json` 有真实内容变化时执行，现在会保留输出、记录阶段时间，并在失败时明确停止，不再吞掉错误。gold patch、test patch、测试命令、F2P/P2P 集合和 resolved 判定均未改变。此 evaluator 适配变化需要新的 run-id，并须重新验证 no-op/gold 对照。
 - Automattic Calypso 的锁定版解析器可能把 shell 跟踪或补丁正文误当作 Jest suite，给测试 ID 加入无关前缀或挤掉最外层 suite。RQ4 只在每个官方 F2P/P2P ID 都能按完整的 `#函数 + 测试描述` 层级后缀唯一、一一对应时规范化判分 ID；缺失、重复或歧义均保持失败。原始 `test_output.txt`、测试状态和官方评测脚本保持不变。解析器兼容处理需要新的 run-id 和 no-op/gold 重验；不能把先前的 gold 对照失败改写为通过。
 - 细粒度定位要求纯 JSON；为兼容部分 OpenAI 兼容模型，也接受且仅接受一个可独立解析的 `json` Markdown 代码块。下游修复使用 CoSIL 风格的英文推理加 SEARCH/REPLACE 块，并保留旧 JSON `edits` 作为兼容输入。响应格式、结束原因和失败阶段写入候选记录；格式失败不会作为同一收费请求自动重发。若所有修复候选都因 API 基础设施失败且没有可评测补丁，该方法样本标为 `infrastructure_failure`，分析结果保持 `unknown`，不计作未解决。
 - 下游流程按 CoSIL RQ3 的结构适配到所选模型：每种方法先保留最多 Top-15 文件及其上游函数排序，再执行一次共享的函数/行区间定位；修复上下文只包含这些区间及前后各 10 行。随后生成 10 个候选（1 个 temperature=0，9 个 temperature=0.8），按归一化补丁投票和稳定破平规则选择，最终只评测一个补丁。

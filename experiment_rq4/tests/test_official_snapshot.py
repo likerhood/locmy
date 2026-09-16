@@ -32,6 +32,13 @@ class OfficialSnapshotTests(unittest.TestCase):
             self.assertEqual(len(ids), 50)
             self.assertIn('chartjs__Chart.js-10806', ids)
             self.assertNotIn('chartjs__Chart.js-8650', ids)
+            for row in rows:
+                script = row['eval_script']
+                self.assertNotIn('chmod -R a+rX node_modules', script)
+                self.assertIn('[rq4-phase] dependency_install_start', script)
+                self.assertIn('[rq4-phase] dependency_install_end', script)
+                self.assertIn('[rq4-infrastructure-error] dependency installation failed', script)
+                self.assertNotIn('yarn install --silent > /dev/null 2>&1 || true', script)
 
     def test_corrupt_official_snapshot_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

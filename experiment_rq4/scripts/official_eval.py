@@ -80,6 +80,11 @@ def main():
     args=p.parse_args()
     from swebench.harness import run_evaluation
     from swebench.harness.log_parsers import PARSER_REGISTRY
+    if run_evaluation.CONTAINER_USER != 'root':
+        raise RuntimeError(
+            'The RQ4 evaluator adapter requires the locked SWE-bench root '
+            'container user; regenerate and re-audit the evaluator before running.'
+        )
     original_calypso = PARSER_REGISTRY['parse_log_calypso']
     def normalized_calypso(log, test_spec):
         return parse_calypso_without_stray_brace(log, test_spec, original_calypso)

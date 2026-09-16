@@ -13,6 +13,54 @@ from run_batch import validate_eval
 ROOT=Path(__file__).resolve().parents[1]
 
 
+# The pinned multimodal snapshot uses this helper in every eval script. The
+# recursive chmod is redundant because the locked SWE-bench harness executes
+# /eval.sh as root, and it is extremely expensive for large node_modules trees
+# on overlay2. Keep the upstream snapshot immutable and apply this exact,
+# audited runtime adapter only to the generated evaluation-only dataset.
+_DEPENDENCY_SETUP_OLD = (
+    'if ! git diff --quiet HEAD -- package.json 2>/dev/null; then '
+    'echo "package.json changed by patch; re-syncing dependencies"; '
+    'export PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true; '
+    'if [ -f yarn.lock ]; then timeout 900 yarn install --silent > /dev/null 2>&1 || true; '
+    'else timeout 900 npm install --silent > /dev/null 2>&1 || true; fi; '
+    'chmod -R a+rX node_modules > /dev/null 2>&1 || true; fi'
+)
+
+_DEPENDENCY_SETUP_NEW = '''if ! git diff --quiet HEAD -- package.json 2>/dev/null; then
+  echo "[rq4-phase] dependency_install_start $(date -Is)"
+  export PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+  if [ -f yarn.lock ]; then
+    timeout 900 yarn install --silent
+    RQ4_INSTALL_STATUS=$?
+  else
+    timeout 900 npm install --silent
+    RQ4_INSTALL_STATUS=$?
+  fi
+  echo "[rq4-phase] dependency_install_end status=$RQ4_INSTALL_STATUS $(date -Is)"
+  if [ "$RQ4_INSTALL_STATUS" -ne 0 ]; then
+    echo "[rq4-infrastructure-error] dependency installation failed status=$RQ4_INSTALL_STATUS"
+    exit "$RQ4_INSTALL_STATUS"
+  fi
+fi'''
+
+
+def adapt_eval_script(row):
+    """Remove one known overlay2-hostile helper without changing test logic."""
+    script = row.get('eval_script', '')
+    count = script.count(_DEPENDENCY_SETUP_OLD)
+    if count != 1:
+        raise SystemExit(
+            f'{row.get("instance_id", "unknown")}: expected exactly one locked '
+            f'dependency setup block, found {count}'
+        )
+    adapted = dict(row)
+    adapted['eval_script'] = script.replace(
+        _DEPENDENCY_SETUP_OLD, _DEPENDENCY_SETUP_NEW, 1
+    )
+    return adapted
+
+
 def main():
     config=json.loads((ROOT/'configs/harness_lock.json').read_text())
     snapshot = ROOT/'configs/official_snapshot.json'
@@ -48,7 +96,7 @@ def main():
                 return ast.literal_eval(value) if isinstance(value,str) else value
             if as_list(remote.get(key)) != as_list(row.get(key)):
                 raise SystemExit(f'{row["instance_id"]}: upstream {key} differs; test identity audit required')
-        selected.append(remote)
+        selected.append(adapt_eval_script(remote))
     target=ROOT/'data/evaluation_only/swe50.harness.jsonl'
     temp=target.with_suffix('.tmp.jsonl')
     temp.write_text(''.join(json.dumps(r)+'\n' for r in selected))

@@ -68,6 +68,33 @@ def generate_one(batch, args, sample):
         if record and record.get('status') == 'started' and 'note' not in record:
             print(f'Skip legacy uncertain paid attempt {method}/{instance}; inspect before manual recovery', flush=True)
             continue
+        localization_path = ROOT/'normalized'/getattr(args, 'dataset', 'swe')/f'{method}.jsonl'
+        localization = (next((row for row in read_rows(localization_path)
+                              if row['instance_id'] == instance), None)
+                        if localization_path.exists() else None)
+        if localization is not None and (localization.get('status') != 'available'
+                                         or not localization.get('found_files')):
+            prediction = {
+                'instance_id': instance,
+                'model_name_or_path': f'rq4-{method}-{os.getenv("RQ4_MODEL", "")}',
+                'model_patch': '',
+                'status': 'missing_localization',
+                'protocol': json.loads((ROOT/'configs/protocol.json').read_text()).get('name'),
+                'selected_candidate': None,
+                'candidate_count': 0,
+                'valid_candidate_count': 0,
+                'candidate_outcomes': {'missing_localization': 1},
+                'infrastructure_candidate_failures': 0,
+                'unique_nonempty_patches': 0,
+                'selection': None,
+                'fine_localization_status': 'not_run',
+                'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            }
+            save(record_path, {'status': 'completed', 'prediction': prediction, 'applied': False,
+                               'elapsed_seconds': 0, 'note': 'Upstream file localization was unavailable or empty; no API call was made.'})
+            print(f'{method}/{instance}: missing_localization, applied=False (no API call)', flush=True)
+            analyze(batch)
+            continue
         # Retryable preparation is deliberately BEFORE the paid-attempt record.
         repo = repo_for(sample)
         ACTIVE_RESOURCES.ensure()
@@ -108,6 +135,8 @@ def evaluate_one(batch, args, sample, dataset_file, method, gold=None):
         prediction = record.get('prediction', {})
         if record.get('status') == 'completed' and prediction.get('status') == 'infrastructure_failure':
             return None
+        if record.get('status') == 'completed' and prediction.get('status') == 'missing_localization':
+            return False
         if record.get('status') != 'completed' or prediction.get('status') not in ['generated','empty_patch']:
             raise RuntimeError(f'{method}/{instance}: generation incomplete; inspect record, no automatic paid retry')
         patch_text = prediction.get('model_patch','')

@@ -64,6 +64,40 @@ class BatchTests(unittest.TestCase):
             )
             self.assertIsNone(result)
 
+    def test_missing_localization_is_known_unsolved_without_official_eval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            batch = Path(tmp)
+            put(batch/'records/cosil/a.json', {
+                'status': 'completed',
+                'prediction': {'status': 'missing_localization', 'model_patch': ''},
+            })
+            result = run_batch.evaluate_one(
+                batch, object(), {'instance_id': 'a'}, batch/'dataset.jsonl', 'cosil',
+            )
+            self.assertFalse(result)
+
+    def test_generate_skips_api_when_upstream_file_localization_is_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            batch = root/'runs/batches/test'
+            put(root/'configs/protocol.json', {'name': 'p'})
+            put(root/'normalized/swe/cosil.jsonl', {
+                'instance_id': 'a', 'found_files': [], 'found_functions': [], 'status': 'available',
+            })
+            put(batch/'manifest.json', {'methods': ['cosil'], 'instance_ids': ['a']})
+            args = type('Args', (), {'methods': ['cosil'], 'dataset': 'swe'})()
+            with patch.object(run_batch, 'ROOT', root), patch.object(run_batch, 'repo_for') as repo:
+                run_batch.generate_one(batch, args, {'instance_id': 'a'})
+            repo.assert_not_called()
+            record = json.loads((batch/'records/cosil/a.json').read_text())
+            self.assertEqual(record['prediction']['status'], 'missing_localization')
+            self.assertEqual(record['prediction']['candidate_count'], 0)
+            self.assertEqual(record['prediction']['usage']['total_tokens'], 0)
+            report = json.loads((batch/'analysis.json').read_text())
+            self.assertEqual(report['summary'][0]['missing_localization'], 1)
+            self.assertEqual(report['summary'][0]['resolved'], 0)
+            self.assertEqual(report['summary'][0]['unknown'], 0)
+
     def test_missing_predictions_prevents_calls(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

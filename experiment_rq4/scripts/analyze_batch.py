@@ -32,7 +32,7 @@ def analyze(batch):
             result = reports.get(instance)
             resolved = result['resolved'] if result else None
             # Explicit completed generation with no patch is a known system failure.
-            if result is None and record.get('status') == 'completed' and not pred.get('model_patch') and pred.get('status') in (None, 'empty_patch'):
+            if result is None and record.get('status') == 'completed' and not pred.get('model_patch') and pred.get('status') in (None, 'empty_patch', 'missing_localization'):
                 resolved = False
             usage = pred.get('usage') or {}
             candidate_outcomes = pred.get('candidate_outcomes') or {}
@@ -42,6 +42,7 @@ def analyze(batch):
                    'candidate_count': pred.get('candidate_count', 0),
                    'valid_candidate_count': pred.get('valid_candidate_count', 0),
                    'candidate_outcomes': json.dumps(candidate_outcomes, sort_keys=True),
+                   'missing_localization': pred.get('status') == 'missing_localization',
                    'infrastructure_candidate_failures': pred.get('infrastructure_candidate_failures', 0),
                    'unique_nonempty_patches': pred.get('unique_nonempty_patches', 0),
                    'selected_candidate': pred.get('selected_candidate'),
@@ -67,6 +68,7 @@ def analyze(batch):
                           'repair_candidates': sum(r['candidate_count'] for r in method_rows),
                           'valid_repair_candidates': sum(r['valid_candidate_count'] for r in method_rows),
                           'candidate_outcomes': method_candidate_outcomes,
+                          'missing_localization': sum(r['missing_localization'] for r in method_rows),
                           'infrastructure_candidate_failures': sum(
                               r['infrastructure_candidate_failures'] for r in method_rows
                           ),
@@ -90,11 +92,11 @@ def analyze(batch):
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     lines = ['# RQ4 batch analysis', '', 'Unknown means no final test conclusion; lower bound is NOT a completed resolved rate.', '',
-             '| Method | N | Generated | Candidates | Valid candidates | API failures | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
-             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
+             '| Method | N | Generated | Missing localization | Candidates | Valid candidates | API failures | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
+             '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in summaries:
         rate = f'{r["resolved_percent"]:.2f}%' if r['complete'] else 'pending'
-        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["repair_candidates"]} | {r["valid_repair_candidates"]} | {r["infrastructure_candidate_failures"]} | {r["unique_nonempty_patches"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
+        lines.append(f'| {r["method"]} | {r["n"]} | {r["generated"]} | {r["missing_localization"]} | {r["repair_candidates"]} | {r["valid_repair_candidates"]} | {r["infrastructure_candidate_failures"]} | {r["unique_nonempty_patches"]} | {r["applied_check"]} | {r["resolved"]} | {r["unknown"]} | {rate} | {r["total_tokens"]} |')
     lines += ['', 'Candidate outcomes (generated, empty, or failed stage):', '', '```json',
               json.dumps({r['method']: r['candidate_outcomes'] for r in summaries}, indent=2), '```']
     lines += ['', 'Paired outcomes (unknown pairs excluded from win/loss counts):', '', '```json', json.dumps(paired, indent=2), '```']

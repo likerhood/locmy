@@ -280,12 +280,26 @@ def main():
 
     fine_result, fine_response = api_call(run_dir/'paid_calls'/'fine_localization', localization_messages,
         protocol['localization_temperature'], protocol['localization_max_output_tokens'])
-    locations, location_format = parse_locations(fine_response['choices'][0]['message']['content'], original)
+    location_error = None
+    try:
+        locations, location_format = parse_locations(
+            fine_response['choices'][0]['message']['content'], original)
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        # A completed provider response with empty/malformed localization is a
+        # valid failed outcome, not infrastructure failure and not a reason to
+        # repeat a paid call. Preserve it and let the remaining methods run.
+        locations, location_format = [], 'invalid'
+        location_error = {'error_type': type(exc).__name__}
+        if isinstance(exc, json.JSONDecodeError):
+            location_error['error_location'] = {'line': exc.lineno, 'column': exc.colno}
     fine = {'instance_id': args.instance_id, 'method': args.method,
-        'status': 'localized' if locations else 'empty_localization', 'file_top_k': protocol['file_top_k'],
+        'status': 'localized' if locations else ('failed_localization' if location_error else 'empty_localization'),
+        'file_top_k': protocol['file_top_k'],
         'candidate_files': list(original), 'upstream_functions': loc.get('found_functions', []),
         'locations': locations, 'response_format': location_format, 'usage': fine_result['usage'],
         'provider_request_id': fine_result.get('provider_request_id')}
+    if location_error:
+        fine.update(location_error)
     save(run_dir/'fine_localization.json', fine)
     print(f'[fine-localization] method={args.method} status={fine["status"]} '
           f'files={len(original)} functions={len(loc.get("found_functions", []))} '

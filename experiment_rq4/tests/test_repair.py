@@ -62,6 +62,8 @@ class RepairTests(unittest.TestCase):
         self.assertIn('function target()', localized_context(files, locations, 1)['a.js'])
         with self.assertRaises(ValueError):
             parse_locations('{"locations":[{"path":"a.js","function":"x","start_line":0,"end_line":4}]}', files)
+        with self.assertRaises(json.JSONDecodeError):
+            parse_locations('', files)
 
     def test_candidate_vote_deduplicates_and_is_deterministic(self):
         candidates = [

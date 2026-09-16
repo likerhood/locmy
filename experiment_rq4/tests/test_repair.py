@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from repair import apply_edits, make_patch, validate_path
+from repair import apply_edits, make_patch, parse_model_edits, validate_path
 from preflight import load_env
 
 
@@ -30,6 +30,26 @@ class RepairTests(unittest.TestCase):
         for path in ['../x', '/tmp/x', '.git/config', 'a/../../x', 'a\\b']:
             with self.assertRaises(ValueError):
                 validate_path(path)
+
+    def test_api_direct_adds_only_configured_host(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / '.env'
+            path.write_text('RQ4_BASE_URL=https://token.example.test/v1\nRQ4_API_DIRECT=1\n')
+            with patch.dict(os.environ, {'HTTPS_PROXY': 'http://127.0.0.1:7890',
+                                         'NO_PROXY': 'localhost'}, clear=True):
+                load_env(path)
+                self.assertEqual(os.environ['NO_PROXY'], 'localhost,token.example.test')
+                self.assertEqual(os.environ['no_proxy'], 'token.example.test')
+                self.assertEqual(os.environ['HTTPS_PROXY'], 'http://127.0.0.1:7890')
+
+    def test_model_edits_accept_strict_or_single_fenced_json(self):
+        self.assertEqual(parse_model_edits('{"edits": []}'), ([], 'json'))
+        content = 'Explanation before.\n```json\n{"edits": []}\n```\n'
+        self.assertEqual(parse_model_edits(content), ([], 'single_json_fence'))
+        with self.assertRaises(json.JSONDecodeError):
+            parse_model_edits('```json\n{"edits": []}\n```\n```json\n{"edits": []}\n```')
+        with self.assertRaises(ValueError):
+            parse_model_edits('{"edits": [], "extra": true}')
 
     def test_ambiguous_and_outside_edits(self):
         for edit in [{'path': 'a.js', 'search': 'x', 'replace': 'y'},

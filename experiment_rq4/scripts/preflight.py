@@ -6,8 +6,28 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def configure_api_route():
+    """Optionally bypass inherited proxies for only the configured API host."""
+    value = os.getenv('RQ4_API_DIRECT', '').strip().lower()
+    if value not in ('', '0', 'false', 'no', '1', 'true', 'yes'):
+        raise ValueError('RQ4_API_DIRECT must be true/false')
+    if value not in ('1', 'true', 'yes'):
+        return None
+    parsed = urlsplit(os.getenv('RQ4_BASE_URL', ''))
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('RQ4_API_DIRECT requires an HTTPS RQ4_BASE_URL without URL credentials')
+    host = parsed.hostname
+    for key in ('NO_PROXY', 'no_proxy'):
+        entries = [item.strip() for item in os.getenv(key, '').split(',') if item.strip()]
+        if host not in entries:
+            entries.append(host)
+        os.environ[key] = ','.join(entries)
+    return host
 
 
 def load_env(path):
@@ -31,6 +51,7 @@ def load_env(path):
                 if os.getenv(source):
                     os.environ[target] = os.environ[source]
                     break
+    configure_api_route()
 
 
 def main():

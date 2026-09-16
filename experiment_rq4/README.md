@@ -41,6 +41,8 @@ RQ4_BASE_URL=https://你的接口基础地址/v1
 RQ4_API_KEY=你的密钥
 RQ4_MODEL=实际MiMo模型ID
 RQ4_REQUEST_TIMEOUT=180
+# 服务器代理会破坏该 API 的 TLS 时启用；只让上述 API 主机直连
+RQ4_API_DIRECT=1
 ```
 
 终端同名变量优先于文件；非空 RQ4_MODEL 优先于旧 MODEL_API_NAME。改变的是修复模型，Qwen 定位不重跑。
@@ -76,6 +78,7 @@ python3 scripts/verify_bundle.py
 - 完整评测仍需官方元数据兼容性、Docker 与 gold/no-op 对照验证；MiMo 接口需要实际试跑。
 - Rootless Docker 可能让镜像源码出现只有权限变化的 Git `M` 标记。RQ4 在官方 `eval.sh` 执行前，只在该测试容器的 `.git/config` 设置 `core.filemode=false`，并检查 `package.json` 没有内容差异；官方脚本、gold 和镜像内容保持原样。若检查失败会停止评测。此兼容处理需要新的 run-id，且仍须重新验证 no-op/gold 对照，不能把旧超时结果当作通过。
 - Automattic Calypso 的 Jest 日志中可能出现孤立的 `}`，锁定版本的官方解析器会把它误当作套件名，令所有测试 ID 多出 `} - ` 前缀。RQ4 只在所有已解析 ID 都带此前缀、去掉它后能完整覆盖该样本官方 F2P/P2P 名单时纠正判分用的 ID；原始 `test_output.txt`、状态和官方评测脚本保持不变。解析器兼容处理需要新的 run-id 和 no-op/gold 重验；不能把先前的 gold 对照失败改写为通过。
+- 某些 OpenAI 兼容模型即使被要求只返回 JSON，仍会先解释再给出单个 `json` Markdown 代码块。修复器接受纯 JSON，或且仅或一个可独立解析的 JSON 代码块；两者仍须严格满足唯一的 `edits` 字段。响应格式记录在 prediction 中，多代码块、额外字段和不可解析内容仍失败，不会自动重试收费请求。
 - 修复器为 Agentless-inspired 独立编辑器，不是官方 Agentless-1.5 原样运行。协议为完整文件、72,000 UTF-8 字节上限、单补丁、无反馈迭代。
 - Omni 最新结果尚未齐备，本包不宣称能完成两个数据集的正式实验。
 - 更新定位输入或模型后使用新 run-id，不混用旧结果。
@@ -83,6 +86,17 @@ python3 scripts/verify_bundle.py
 若源码 Git 镜像和 GitHub 克隆都很慢或失败，但同一题的官方评测镜像已本地缓存，可在**流水线停止后**运行 `python3 scripts/cache_repo_from_image.py --run-id <run-id> --instance-id <instance-id>`。该工具只从此批次锁定摘要的镜像 `/testbed/.git` 导入 Git 对象，核验历史 `base_commit` 和至少一个定位候选文件后，原子地建立 `repos/<owner>__<name>/`，并记录 `.rq4-source.json` 来源。不会复制镜像当前工作树、gold 补丁或测试结果。成功后重复相同流水线命令即可复用既有 no-op/gold 报告；若镜像缺少所需 Git 对象，工具会停止且不建立缓存。
 
 输出：`runs/batches/<run-id>/`，含补丁、逐例记录、官方报告（如已测试）、`analysis.md`、`analysis.json`、`per_instance.csv`。缺少官方判定时保留 unknown，不能把补丁可应用当成解决。
+
+### 网络路径与镜像配置
+
+RQ4 涉及四条相互独立的网络路径，不能用一项“镜像”配置替代全部路径：
+
+- MiMo API 由 Python 进程访问，默认继承 shell 的 `HTTP(S)_PROXY`。若代理对 API 主机产生 TLS EOF，在所选 env 文件设置 `RQ4_API_DIRECT=1`；加载配置时只把 `RQ4_BASE_URL` 的主机追加到 `NO_PROXY` 和 `no_proxy`，无需每次手工 export。该选择写入批次 manifest，改变设置后必须使用新 run-id。
+- Git 源码先用 `RQ4_GITHUB_MIRROR_PREFIX`，再回退 GitHub。确认镜像不可用时可在 env 文件中设置空的 `RQ4_GITHUB_MIRROR_PREFIX=`。每次 clone/fetch 的真实错误保存在 `runs/batches/<run-id>/repo_clone.log`。评测镜像已经包含同一提交时，也可按上文工具核验后导入 Git 对象。
+- Python 包和 Hugging Face 数据由宿主 Python/pip 下载，使用各自的 index、endpoint、代理或 `NO_PROXY` 配置；Docker registry mirror 对它们无效。
+- Docker Hub 镜像由 rootless Docker daemon 拉取，使用该 daemon 的 `daemon.json` registry mirror 或 systemd 代理。只有修改 daemon 配置后才需重启 Docker；普通实验重跑不需重启。
+
+因此，Docker 镜像拉取成功不代表 Git、PyPI、Hugging Face 或 MiMo API 一定可达；排错时应先确认失败属于哪条路径。
 
 完整执行和分析命令见[一键运行与结果分析](一键运行与结果分析.md)。历史本地试跑见[运行环境与首次修复记录](运行环境与首次修复记录.md)，不代表当前 MiMo 或官方评测已跑通。
 

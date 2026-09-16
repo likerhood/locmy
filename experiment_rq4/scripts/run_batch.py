@@ -155,7 +155,9 @@ def main():
     for sample in samples:
         if not re.fullmatch(r'[A-Za-z0-9_.-]+',sample['instance_id']):
             p.error('Unsafe instance ID')
-    source_paths = [ROOT/'configs/protocol.json', ROOT/'data/inputs'/f'{args.dataset}50.jsonl', ROOT/'scripts/repair.py']
+    source_paths = [ROOT/'configs/protocol.json', ROOT/'data/inputs'/f'{args.dataset}50.jsonl',
+                    ROOT/'scripts/repair.py']
+    source_paths += [ROOT/'scripts/preflight.py'] if (ROOT/'scripts/preflight.py').exists() else []
     source_paths += [ROOT/'scripts'/name for name in ['run_batch.py','official_eval.py','resources.py','git_cache.py'] if (ROOT/'scripts'/name).exists()]
     source_paths += [ROOT/'configs/harness_lock.json'] if (ROOT/'configs/harness_lock.json').exists() else []
     for method in args.methods:
@@ -205,6 +207,7 @@ def main():
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         manifest = {'dataset':args.dataset,'methods':args.methods,'instance_ids':[r['instance_id'] for r in samples],
             'hashes':hashes,'model':os.getenv('RQ4_MODEL',''),'endpoint_hash':hashlib.sha256(os.getenv('RQ4_BASE_URL','').encode()).hexdigest(),
+            'api_direct':os.getenv('RQ4_API_DIRECT','').strip().lower() in ('1','true','yes'),
             'protocol':'development_byte_budget_K1_serial_v2','test_timeout':args.test_timeout}
         existing = batch/'manifest.json'
         if existing.exists():

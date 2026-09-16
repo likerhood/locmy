@@ -11,9 +11,11 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from preflight import load_env
 
@@ -56,6 +58,27 @@ def make_patch(original, updated):
                                         fromfile=f'a/{path}', tofile=f'b/{path}'):
             parts.append(line if line.endswith('\n') else line + '\n\\ No newline at end of file\n')
     return ''.join(parts)
+
+
+def parse_model_edits(content):
+    """Accept strict JSON or one JSON fence while retaining a narrow schema."""
+    if not isinstance(content, str):
+        raise TypeError('Model content must be a string')
+    response_format = 'json'
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError:
+        blocks = re.findall(r'```(?:json)?[ \t]*\r?\n?(.*?)```', content,
+                            flags=re.DOTALL | re.IGNORECASE)
+        if len(blocks) != 1:
+            raise
+        payload = json.loads(blocks[0].strip())
+        response_format = 'single_json_fence'
+    if not isinstance(payload, dict) or set(payload) != {'edits'}:
+        raise ValueError('Model JSON must contain only the edits field')
+    if not isinstance(payload['edits'], list):
+        raise ValueError('Model edits must be a list')
+    return payload['edits'], response_format
 
 
 def main():
@@ -128,13 +151,18 @@ def main():
         (run_dir / 'response.json').write_text(json.dumps(data, ensure_ascii=False, indent=2))
         result['usage'] = data.get('usage', {})
         result['provider_request_id'] = data.get('id')
-        edits = json.loads(data['choices'][0]['message']['content'])['edits']
+        edits, response_format = parse_model_edits(data['choices'][0]['message']['content'])
+        result['response_format'] = response_format
         updated = apply_edits(original, edits)
         result['model_patch'] = make_patch(original, updated)
         result['status'] = 'generated' if result['model_patch'] else 'empty_patch'
     except Exception as exc:
         # Do not log request headers, credentials, or arbitrary API error bodies.
         result['error_type'] = type(exc).__name__
+        if isinstance(exc, urllib.error.URLError):
+            result['error_reason_type'] = type(exc.reason).__name__
+        elif isinstance(exc, json.JSONDecodeError):
+            result['error_location'] = {'line': exc.lineno, 'column': exc.colno}
     result['elapsed_seconds'] = time.monotonic() - start
     (run_dir / 'prediction.jsonl').write_text(json.dumps(result, ensure_ascii=False) + '\n')
     print(f'{result["status"]}: {run_dir / "prediction.jsonl"}; official evaluation not run')

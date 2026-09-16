@@ -43,6 +43,10 @@ def repo_for(root, sample, resources):
     if not 1 <= retries <= 5 or timeout <= 0:
         raise ValueError('Git retries must be 1..5 and timeout positive')
     git = ['git', '-c', 'http.lowSpeedLimit=1024', '-c', 'http.lowSpeedTime=60']
+    resource_batch = getattr(resources, 'batch', None)
+    clone_log = ((Path(resource_batch) if isinstance(resource_batch, (str, os.PathLike))
+                  else Path(root) / 'reports') / 'repo_clone.log')
+    clone_log.parent.mkdir(parents=True, exist_ok=True)
     for index, url in enumerate(urls(repo)):
         for attempt in range(retries):
             temporary = None
@@ -50,11 +54,19 @@ def repo_for(root, sample, resources):
                 if not path.exists():
                     temporary = Path(tempfile.mkdtemp(prefix='.rq4-clone-', dir=path.parent))
                     target = temporary / 'repo'
-                    resources.run(git + ['clone', '--no-checkout', url, str(target)], timeout=timeout)
+                    with clone_log.open('a') as log:
+                        log.write(f'\n[clone] repo={repo} source={index} attempt={attempt + 1}\n')
+                        log.flush()
+                        resources.run(git + ['clone', '--no-checkout', url, str(target)],
+                                      stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
                 else:
                     target = path
                 if not has_commit(target, commit):
-                    resources.run(git + ['-C', str(target), 'fetch', '--no-tags', url, commit], timeout=timeout)
+                    with clone_log.open('a') as log:
+                        log.write(f'\n[fetch] repo={repo} source={index} attempt={attempt + 1}\n')
+                        log.flush()
+                        resources.run(git + ['-C', str(target), 'fetch', '--no-tags', url, commit],
+                                      stdout=log, stderr=subprocess.STDOUT, timeout=timeout)
                 if not has_commit(target, commit):
                     raise RuntimeError('Downloaded repository lacks requested commit')
                 if temporary:

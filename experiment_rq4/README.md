@@ -34,12 +34,12 @@ chmod 600 .env.local
 
 初始化会校验输入、建立 Python venv、下载锁定版本 Agentless、从本目录压缩记录恢复 `data/evaluation_only/` 并预检；不收费。Python 需要 3.10+，建议 3.12；模型走 API，无需本地 GPU。Git、venv 支持和上游下载网络需服务器提供。输入完整不代表 Docker 和官方评测已可用。
 
-`.env.local` 使用实际服务商支持的 MiMo 模型 ID：
+`.env.local` 使用实际服务商支持的模型 ID：
 
 ```dotenv
 RQ4_BASE_URL=https://你的接口基础地址/v1
 RQ4_API_KEY=你的密钥
-RQ4_MODEL=实际MiMo模型ID
+RQ4_MODEL=服务商实际模型ID
 RQ4_REQUEST_TIMEOUT=180
 # 服务器代理会破坏该 API 的 TLS 时启用；只让上述 API 主机直连
 RQ4_API_DIRECT=1
@@ -51,7 +51,7 @@ RQ4_API_DIRECT=1
 # 无收费请求
 bash scripts/server_run.sh --mode check --dataset swe
 
-# 一例 MAGNET addtest3 + MiMo，会发起 1 次细粒度定位和 10 次候选修复请求；
+# 一例 MAGNET + 所选模型，会发起 1 次细粒度定位和 10 次候选修复请求；
 # 只生成、选择和检查补丁，不运行官方测试
 bash scripts/server_run.sh --mode generate --dataset swe --methods magnet --limit 1 --run-id swe-addtest3-mimo-api-smoke-v1
 ```
@@ -76,11 +76,11 @@ python3 scripts/verify_bundle.py
 ## 当前限制和结果
 
 - 已有串行调度与空间监测，默认预留 10 GiB；50 GB 下仍需单例实测环境峰值，详见新部署说明。
-- 完整评测仍需官方元数据兼容性、Docker 与 gold/no-op 对照验证；MiMo 接口需要实际试跑。
+- 完整评测仍需官方元数据兼容性、Docker 与 gold/no-op 对照验证；所选模型接口需要实际试跑。
 - Rootless Docker 可能让镜像源码出现只有权限变化的 Git `M` 标记。RQ4 在官方 `eval.sh` 执行前，只在该测试容器的 `.git/config` 设置 `core.filemode=false`，并检查 `package.json` 没有内容差异；官方脚本、gold 和镜像内容保持原样。若检查失败会停止评测。此兼容处理需要新的 run-id，且仍须重新验证 no-op/gold 对照，不能把旧超时结果当作通过。
 - Automattic Calypso 的 Jest 日志中可能出现孤立的 `}`，锁定版本的官方解析器会把它误当作套件名，令所有测试 ID 多出 `} - ` 前缀。RQ4 只在所有已解析 ID 都带此前缀、去掉它后能完整覆盖该样本官方 F2P/P2P 名单时纠正判分用的 ID；原始 `test_output.txt`、状态和官方评测脚本保持不变。解析器兼容处理需要新的 run-id 和 no-op/gold 重验；不能把先前的 gold 对照失败改写为通过。
 - 细粒度定位要求纯 JSON；为兼容部分 OpenAI 兼容模型，也接受且仅接受一个可独立解析的 `json` Markdown 代码块。下游修复使用 CoSIL 风格的英文推理加 SEARCH/REPLACE 块，并保留旧 JSON `edits` 作为兼容输入。响应格式、结束原因和失败阶段写入候选记录；格式失败不会作为同一收费请求自动重发。
-- 下游流程按 CoSIL RQ3 的结构适配到 MiMo：每种方法先保留最多 Top-15 文件及其上游函数排序，再执行一次共享的函数/行区间定位；修复上下文只包含这些区间及前后各 10 行。随后生成 10 个候选（1 个 temperature=0，9 个 temperature=0.8），按完全相同补丁去重和多数票确定性选择，最终只评测一个补丁。
+- 下游流程按 CoSIL RQ3 的结构适配到所选模型：每种方法先保留最多 Top-15 文件及其上游函数排序，再执行一次共享的函数/行区间定位；修复上下文只包含这些区间及前后各 10 行。随后生成 10 个候选（1 个 temperature=0，9 个 temperature=0.8），按归一化补丁投票和稳定破平规则选择，最终只评测一个补丁。
 - `Top-15` 表示使用上游实际提供的前 15 名。CoSIL 历史快照只有 5 个文件、GALA 某些样本少于 15 个时，程序使用全部已有项，不补造排名。每条 `normalized` 记录同时保存 `found_files` 和 `found_functions`；上游函数为空时，共享细粒度定位阶段从候选文件函数定义清单中选择。
 - 这不是逐字复刻 CoSIL 的 `patch_gen.sh`：模型由所选 env 文件决定，修复输出采用 CoSIL SEARCH/REPLACE，候选选择使用归一化去重多数票；当前不运行 CoSIL 的模型生成 reproduction/regression 测试，避免额外测试生成质量成为五种定位方法之间的混杂变量。no-op/gold 对照和最终官方 SWE-bench 测试保持不变。
 - 每个样本方法最多产生 11 次收费请求，所以 1 样本 × 5 方法最多 55 次，50 样本 × 5 方法最多 2750 次。`--mode check` 会在收费前打印精确计划数。每次请求独立记录在 `attempts/<method>/<instance>/paid_calls/`；只有完整响应可自动复用，结果不确定的请求不会自动重发。
@@ -112,7 +112,7 @@ RQ4 涉及四条相互独立的网络路径，不能用一项“镜像”配置�
 
 原版 CoSIL RQ3 还用独立生成的 reproduction/regression tests 过滤候选。当前 SWE/Omni 冻结数据没有与五种定位方法共享且经过验证的独立生成测试集，因此本协议不会拿官方 F2P/P2P 测试做候选选择；这样避免使用最终评测证据进行 rerank。该差异写入 `configs/protocol.json` 的 `rerank_test_policy`，不能把本协议描述为逐行复刻原版测试 reranker。若后续加入候选无关、按样本冻结的生成测试，必须给测试来源和模型调用单独留痕、先在 base/gold 对照验证，并使用新协议名和新 run-id。
 
-因此，Docker 镜像拉取成功不代表 Git、PyPI、Hugging Face 或 MiMo API 一定可达；排错时应先确认失败属于哪条路径。
+因此，Docker 镜像拉取成功不代表 Git、PyPI、Hugging Face 或模型 API 一定可达；排错时应先确认失败属于哪条路径。
 
 完整执行和分析命令见[一键运行与结果分析](一键运行与结果分析.md)。历史本地试跑见[运行环境与首次修复记录](运行环境与首次修复记录.md)，不代表当前 MiMo 或官方评测已跑通。
 

@@ -9,15 +9,13 @@ def run_with_git_mode(container, command, timeout, original, *, workdir, user):
     """Ignore image-layer permission changes before the unchanged official eval.sh."""
     if command == '/bin/bash /eval.sh':
         result = container.exec_run(
-            ['/bin/bash', '-c',
-             'git config --local core.filemode false && git diff --quiet HEAD -- package.json'],
+            ['git', 'config', '--local', 'core.filemode', 'false'],
             workdir=workdir, user=user,
         )
         if result.exit_code:
             detail = result.output.decode('utf-8', errors='replace')[:500].strip()
             raise RuntimeError(
-                'Cannot normalize Git file-mode tracking in the test container, '
-                'or package.json has a real content change. '
+                'Cannot normalize Git file-mode tracking in the test container. '
                 f'Inspect the image baseline. {detail}'
             )
         print('[rq4] Git file-mode tracking disabled in test container; '

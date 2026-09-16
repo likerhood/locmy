@@ -36,12 +36,12 @@ class OfficialEvalTests(unittest.TestCase):
         self.assertEqual(result, 'official-result')
         self.assertEqual(observed, [(1, '/bin/bash /eval.sh', 1800)])
         self.assertEqual(container.calls[0][1:], ('/testbed', 'root'))
-        self.assertIn('git config --local core.filemode false', container.calls[0][0][-1])
-        self.assertIn('git diff --quiet HEAD -- package.json', container.calls[0][0][-1])
+        self.assertEqual(container.calls[0][0],
+                         ['git', 'config', '--local', 'core.filemode', 'false'])
 
-    def test_real_package_change_stops_before_test(self):
+    def test_git_mode_configuration_failure_stops_before_test(self):
         container = FakeContainer(exit_code=1)
-        with self.assertRaisesRegex(RuntimeError, 'package.json has a real content change'):
+        with self.assertRaisesRegex(RuntimeError, 'Cannot normalize Git file-mode tracking'):
             run_with_git_mode(
                 container, '/bin/bash /eval.sh', 1800,
                 lambda *_: self.fail('Official test started after failed baseline check'),

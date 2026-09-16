@@ -74,6 +74,39 @@ class OfficialEvalTests(unittest.TestCase):
             other_prefix,
         )
 
+    def test_calypso_mixed_wrapper_prefixes_are_normalized(self):
+        spec = SimpleNamespace(
+            instance_id='Automattic__wp-calypso-21409',
+            FAIL_TO_PASS=['selectors - #getCountriesWithStates - returns countries'],
+            PASS_TO_PASS=['selectors - #getStates - returns states'],
+        )
+        parsed = {
+            '} - selectors - #getCountriesWithStates - returns countries': 'PASSED',
+            'shell wrapper - selectors - #getStates - returns states': 'PASSED',
+            'unrelated parser output': 'FAILED',
+        }
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = parse_calypso_without_stray_brace('', spec, lambda *_: parsed)
+        self.assertEqual(result[spec.FAIL_TO_PASS[0]], 'PASSED')
+        self.assertEqual(result[spec.PASS_TO_PASS[0]], 'PASSED')
+        self.assertEqual(result['unrelated parser output'], 'FAILED')
+        self.assertNotIn('} - selectors - #getCountriesWithStates - returns countries', result)
+
+    def test_calypso_ambiguous_suffix_is_not_normalized(self):
+        spec = SimpleNamespace(
+            instance_id='Automattic__wp-calypso-21409',
+            FAIL_TO_PASS=['selectors - duplicate'],
+            PASS_TO_PASS=[],
+        )
+        parsed = {
+            '} - selectors - duplicate': 'PASSED',
+            'wrapper - selectors - duplicate': 'FAILED',
+        }
+        self.assertIs(
+            parse_calypso_without_stray_brace('', spec, lambda *_: parsed),
+            parsed,
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

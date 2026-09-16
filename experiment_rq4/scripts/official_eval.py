@@ -26,16 +26,35 @@ def run_with_git_mode(container, command, timeout, original, *, workdir, user):
 
 
 def parse_calypso_without_stray_brace(log, test_spec, original):
-    """Remove a stray shell-output suite only when all expected IDs validate."""
+    """Normalize stray Calypso suite prefixes only with complete unique coverage.
+
+    The official parser treats any indented line before Jest's results as a suite
+    name.  Shell tracing can therefore prepend ``}`` (or other wrapper output) to
+    otherwise valid test IDs.  Match each expected ID as either an exact parser
+    key or a complete ``" - "``-delimited suffix.  Refuse to change anything
+    unless every expected ID has exactly one distinct source key.
+    """
     parsed = original(log, test_spec)
     expected = set(test_spec.FAIL_TO_PASS) | set(test_spec.PASS_TO_PASS)
-    prefix = '} - '
-    if not parsed or not expected or not all(name.startswith(prefix) for name in parsed):
+    if not parsed or not expected or expected.issubset(parsed):
         return parsed
-    corrected = {name[len(prefix):]: status for name, status in parsed.items()}
-    if len(corrected) != len(parsed) or not expected.issubset(corrected):
+
+    sources = {}
+    for test_id in expected:
+        suffix = f' - {test_id}'
+        matches = [name for name in parsed if name == test_id or name.endswith(suffix)]
+        if len(matches) != 1:
+            return parsed
+        sources[test_id] = matches[0]
+    if len(set(sources.values())) != len(expected):
         return parsed
-    print(f'[rq4] Removed stray brace suite prefix from {len(parsed)} Calypso '
+
+    corrected = dict(parsed)
+    for test_id, source in sources.items():
+        if source != test_id:
+            corrected.pop(source, None)
+        corrected[test_id] = parsed[source]
+    print(f'[rq4] Normalized stray suite prefixes for {len(expected)} Calypso '
           f'test IDs for {test_spec.instance_id}; all {len(expected)} expected IDs matched.',
           flush=True)
     return corrected

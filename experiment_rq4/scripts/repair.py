@@ -385,7 +385,7 @@ def main():
         'model_name_or_path': f'rq4-{args.method}-{os.environ["RQ4_MODEL"]}',
         'model_patch': selected['model_patch'] if selected else '',
         'status': 'generated' if selected else 'empty_patch',
-        'protocol': 'cosil_rq3_aligned_top15_k10_v1',
+        'protocol': protocol['name'],
         'selected_candidate': selected['candidate_index'] if selected else None,
         'candidate_count': len(candidates),
         'unique_nonempty_patches': len({x['model_patch'] for x in candidates if x['model_patch']}),

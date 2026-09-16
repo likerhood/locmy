@@ -1,19 +1,20 @@
 {
-  "name": "cosil_rq3_aligned_top15_k10_v1",
+  "name": "cosil_rq3_aligned_top15_k10_v2",
   "localization_model_label": "Qwen3.5-397B-A17B",
   "file_top_k": 15,
   "localization_excerpt_radius": 18,
   "max_symbol_excerpts_per_file": 12,
   "localization_temperature": 0,
-  "localization_max_output_tokens": 4096,
+  "localization_max_output_tokens": 8192,
   "context_window": 10,
   "candidates_per_instance": 10,
   "greedy_temperature": 0,
   "greedy_max_output_tokens": 8192,
   "sampling_temperature": 0.8,
-  "sampling_max_output_tokens": 4096,
+  "sampling_max_output_tokens": 8192,
   "max_code_utf8_bytes": 72000,
   "candidate_selection": "exact_patch_dedup_then_frequency_then_lowest_index",
   "status": "formal_candidate_protocol",
-  "notes": "CoSIL RQ3 aligned adaptation: upstream ranked files/functions, shared fine function+line localization, 1 greedy + 9 stochastic repair candidates, deterministic dedup/vote, and one final official evaluation. Top-15 means up to 15 available ranked files; no rank is fabricated. MiMo JSON search/replace is retained for strict parsing. Reproduction/regression candidate tests are not used, avoiding generated-test confounding across localization methods."
+  "prompt_contract": "strict_english_json_v2",
+  "notes": "CoSIL RQ3 aligned adaptation: upstream ranked files/functions, shared fine function+line localization, 1 greedy + 9 stochastic repair candidates, deterministic dedup/vote, and one final official evaluation. Fine localization and every repair candidate receive an 8192-token output budget so reasoning does not consume the entire response before final JSON. Top-15 means up to 15 available ranked files; no rank is fabricated. MiMo JSON search/replace is retained for strict parsing. Reproduction/regression candidate tests are not used, avoiding generated-test confounding across localization methods."
 }

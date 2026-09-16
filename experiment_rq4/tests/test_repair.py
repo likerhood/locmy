@@ -24,6 +24,11 @@ class RepairTests(unittest.TestCase):
             self.assertIn(f'only the {key} key', prompt)
             self.assertIn('Never return an empty response', prompt)
 
+        protocol = json.loads((ROOT / 'configs/protocol.json').read_text())
+        self.assertEqual(protocol['prompt_contract'], 'strict_english_json_v2')
+        self.assertGreaterEqual(protocol['localization_max_output_tokens'], 8192)
+        self.assertGreaterEqual(protocol['sampling_max_output_tokens'], 8192)
+
     def test_mycode_env_aliases_and_override(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / '.env'

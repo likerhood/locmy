@@ -211,7 +211,7 @@ def localized_context(files, locations, window):
 
 
 def api_call(call_dir, messages, temperature, max_tokens):
-    """Execute exactly one durable paid request; never retry uncertainty."""
+    """Execute a durable request, retrying only explicit transient HTTP failures."""
     result_path, response_path = call_dir/'result.json', call_dir/'response.json'
     if result_path.exists() and response_path.exists():
         return json.loads(result_path.read_text()), json.loads(response_path.read_text())
@@ -220,27 +220,58 @@ def api_call(call_dir, messages, temperature, max_tokens):
     call_dir.mkdir(parents=True)
     body = {'model': os.environ['RQ4_MODEL'], 'messages': messages,
             'temperature': temperature, 'max_tokens': max_tokens}
-    save(call_dir/'attempt.json', {'status': 'started',
-        'request_sha256': hashlib.sha256(json.dumps(body, ensure_ascii=False).encode()).hexdigest(),
-        'temperature': temperature, 'max_tokens': max_tokens, 'started_at': time.time()})
-    request = urllib.request.Request(os.environ['RQ4_BASE_URL'].rstrip('/') + '/chat/completions',
-        data=json.dumps(body).encode(), headers={'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + os.environ['RQ4_API_KEY']})
-    start = time.monotonic()
     try:
-        with urllib.request.urlopen(request, timeout=int(os.getenv('RQ4_REQUEST_TIMEOUT', '180'))) as response:
-            data = json.load(response)
-        save(response_path, data)
-        result = {'status': 'completed', 'elapsed_seconds': time.monotonic()-start,
-                  'usage': data.get('usage') or {}, 'provider_request_id': data.get('id')}
-        save(result_path, result)
-        return result, data
-    except Exception as exc:
-        failure = {'status': 'failed', 'error_type': type(exc).__name__, 'elapsed_seconds': time.monotonic()-start}
-        if isinstance(exc, urllib.error.URLError):
-            failure['error_reason_type'] = type(exc.reason).__name__
-        save(call_dir/'failure.json', failure)
-        raise
+        http_retries = max(0, int(os.getenv('RQ4_HTTP_RETRIES', '2')))
+    except ValueError as exc:
+        raise ValueError('RQ4_HTTP_RETRIES must be an integer') from exc
+    raw_sleeps = os.getenv('RQ4_HTTP_RETRY_SLEEPS', '10,30')
+    try:
+        retry_sleeps = [max(0.0, float(x.strip())) for x in raw_sleeps.split(',') if x.strip()]
+    except ValueError as exc:
+        raise ValueError('RQ4_HTTP_RETRY_SLEEPS must be comma-separated numbers') from exc
+    attempt = {'status': 'started',
+        'request_sha256': hashlib.sha256(json.dumps(body, ensure_ascii=False).encode()).hexdigest(),
+        'temperature': temperature, 'max_tokens': max_tokens, 'started_at': time.time(),
+        'http_retry_limit': http_retries, 'http_failures': []}
+    save(call_dir/'attempt.json', attempt)
+    start = time.monotonic()
+    retryable_statuses = {429, 500, 502, 503, 504}
+    for request_index in range(http_retries + 1):
+        request = urllib.request.Request(os.environ['RQ4_BASE_URL'].rstrip('/') + '/chat/completions',
+            data=json.dumps(body).encode(), headers={'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + os.environ['RQ4_API_KEY']})
+        try:
+            with urllib.request.urlopen(request, timeout=int(os.getenv('RQ4_REQUEST_TIMEOUT', '180'))) as response:
+                data = json.load(response)
+            save(response_path, data)
+            result = {'status': 'completed', 'elapsed_seconds': time.monotonic()-start,
+                      'usage': data.get('usage') or {}, 'provider_request_id': data.get('id'),
+                      'http_attempt_count': request_index + 1}
+            save(result_path, result)
+            return result, data
+        except urllib.error.HTTPError as exc:
+            event = {'attempt_number': request_index + 1, 'http_status': exc.code,
+                     'http_reason': str(exc.reason), 'elapsed_seconds': time.monotonic()-start}
+            attempt['http_failures'].append(event)
+            save(call_dir/'attempt.json', attempt)
+            if exc.code in retryable_statuses and request_index < http_retries:
+                delay = retry_sleeps[min(request_index, len(retry_sleeps)-1)] if retry_sleeps else 0
+                event['retry_after_seconds'] = delay
+                save(call_dir/'attempt.json', attempt)
+                if delay:
+                    time.sleep(delay)
+                continue
+            save(call_dir/'failure.json', {'status': 'failed', 'error_type': type(exc).__name__,
+                'http_status': exc.code, 'http_reason': str(exc.reason),
+                'http_attempt_count': request_index + 1, 'elapsed_seconds': time.monotonic()-start})
+            raise
+        except Exception as exc:
+            failure = {'status': 'failed', 'error_type': type(exc).__name__,
+                       'http_attempt_count': request_index + 1, 'elapsed_seconds': time.monotonic()-start}
+            if isinstance(exc, urllib.error.URLError):
+                failure['error_reason_type'] = type(exc.reason).__name__
+            save(call_dir/'failure.json', failure)
+            raise
 
 
 def load_files(repo, sample, found_files, top_k):

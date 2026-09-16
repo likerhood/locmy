@@ -1,21 +1,48 @@
 import json
+import io
 import subprocess
 import sys
 import tempfile
 import unittest
 import os
+import urllib.error
 from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from repair import (LOCALIZATION_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, apply_edits,
+from repair import (LOCALIZATION_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, api_call, apply_edits,
                     choose_candidate, line_evidence, localized_context, make_patch,
                     parse_locations, parse_model_edits, validate_path)
 from preflight import load_env
 
 
 class RepairTests(unittest.TestCase):
+    def test_api_retries_explicit_http_500_but_not_connection_uncertainty(self):
+        class Response:
+            def __enter__(self):
+                return io.StringIO('{"id":"ok","choices":[],"usage":{}}')
+
+            def __exit__(self, *args):
+                return False
+
+        env = {'RQ4_MODEL': 'model', 'RQ4_BASE_URL': 'https://api.example/v1',
+               'RQ4_API_KEY': 'test', 'RQ4_HTTP_RETRIES': '2',
+               'RQ4_HTTP_RETRY_SLEEPS': '0'}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env, clear=True):
+            error = urllib.error.HTTPError('https://api.example', 500, 'Internal', {}, None)
+            with patch('urllib.request.urlopen', side_effect=[error, Response()]) as request:
+                result, _ = api_call(Path(tmp) / 'http', [], 0, 10)
+            self.assertEqual(request.call_count, 2)
+            self.assertEqual(result['http_attempt_count'], 2)
+            attempt = json.loads((Path(tmp) / 'http/attempt.json').read_text())
+            self.assertEqual(attempt['http_failures'][0]['http_status'], 500)
+
+            with patch('urllib.request.urlopen', side_effect=urllib.error.URLError('reset')) as request:
+                with self.assertRaises(urllib.error.URLError):
+                    api_call(Path(tmp) / 'connection', [], 0, 10)
+            self.assertEqual(request.call_count, 1)
+
     def test_prompts_are_english_and_state_strict_output_contracts(self):
         for prompt, key in [(LOCALIZATION_SYSTEM_PROMPT, 'locations'),
                             (REPAIR_SYSTEM_PROMPT, 'edits')]:

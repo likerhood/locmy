@@ -29,29 +29,31 @@ def parse_calypso_without_stray_brace(log, test_spec, original):
     The official parser treats any indented line before Jest's results as a suite
     name.  Shell tracing can therefore prepend ``}`` (or other wrapper output) to
     otherwise valid test IDs, and can displace the outer Jest suite name.  Match
-    on complete ``" - "``-delimited components from the right (normally the
-    ``#function`` group plus test description).  Refuse to change anything
-    unless every expected ID has exactly one distinct source key.
+    on the longest complete ``" - "``-delimited suffix from the right.  This
+    normally retains ``#function`` plus description; a description-only match is
+    accepted only when it is uniquely best.  Refuse to change anything unless
+    every expected ID has exactly one distinct source key.
     """
     parsed = original(log, test_spec)
     expected = set(test_spec.FAIL_TO_PASS) | set(test_spec.PASS_TO_PASS)
     if not parsed or not expected or expected.issubset(parsed):
         return parsed
 
-    def component_suffix_matches(actual, wanted):
+    def common_component_suffix(actual, wanted):
         actual_parts = actual.split(' - ')
         wanted_parts = wanted.split(' - ')
-        required = 1 if len(wanted_parts) == 1 else 2
         common = 0
         for actual_part, wanted_part in zip(reversed(actual_parts), reversed(wanted_parts)):
             if actual_part != wanted_part:
                 break
             common += 1
-        return common >= required
+        return common
 
     sources = {}
     for test_id in expected:
-        matches = [name for name in parsed if component_suffix_matches(name, test_id)]
+        scores = {name: common_component_suffix(name, test_id) for name in parsed}
+        best = max(scores.values(), default=0)
+        matches = [name for name, score in scores.items() if score == best and score > 0]
         if len(matches) != 1:
             return parsed
         sources[test_id] = matches[0]

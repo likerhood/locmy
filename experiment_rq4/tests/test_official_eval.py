@@ -111,6 +111,31 @@ class OfficialEvalTests(unittest.TestCase):
         self.assertEqual(set(result), set(spec.FAIL_TO_PASS + spec.PASS_TO_PASS))
         self.assertTrue(all(status == 'PASSED' for status in result.values()))
 
+    def test_calypso_missing_two_part_outer_suite_uses_unique_longest_suffix(self):
+        spec = SimpleNamespace(
+            instance_id='Automattic__wp-calypso-21648',
+            FAIL_TO_PASS=[
+                'reducer - disabled option keeps empty value',
+                'actions - #emailSettingsSubmitSettings() - should dispatch a request action',
+            ],
+            PASS_TO_PASS=[
+                'reducer - should store data from the action',
+                'actions - #fetchEmailSettings() - should dispatch a request action',
+            ],
+        )
+        parsed = {
+            # The parser lost the two-part reducer suite but descriptions remain unique.
+            'shell output - disabled option keeps empty value': 'PASSED',
+            'shell output - should store data from the action': 'PASSED',
+            # Repeated descriptions remain distinguishable by their function component.
+            'wrapper - #emailSettingsSubmitSettings() - should dispatch a request action': 'PASSED',
+            'wrapper - #fetchEmailSettings() - should dispatch a request action': 'PASSED',
+        }
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = parse_calypso_without_stray_brace('', spec, lambda *_: parsed)
+        self.assertEqual(set(result), set(spec.FAIL_TO_PASS + spec.PASS_TO_PASS))
+        self.assertTrue(all(status == 'PASSED' for status in result.values()))
+
     def test_calypso_ambiguous_suffix_is_not_normalized(self):
         spec = SimpleNamespace(
             instance_id='Automattic__wp-calypso-21409',

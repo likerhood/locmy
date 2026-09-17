@@ -114,6 +114,33 @@ class Resources:
         finally:
             self.event('command_finished', executable=command[0], seconds=time.monotonic()-start, free_bytes=self.space())
 
+    def pull_image(self, requested, log):
+        """Retry Docker pulls without discarding layers completed by earlier attempts."""
+        timeout = int(os.getenv('RQ4_IMAGE_PULL_TIMEOUT', '1800'))
+        attempts = int(os.getenv('RQ4_IMAGE_PULL_RETRIES', '3'))
+        delay = int(os.getenv('RQ4_IMAGE_PULL_RETRY_DELAY', '10'))
+        if timeout <= 0 or not 1 <= attempts <= 5 or delay < 0:
+            raise ValueError('Image pull timeout must be positive, retries 1..5, and delay nonnegative')
+        for attempt in range(1, attempts + 1):
+            log.write(f'\n[rq4-image-pull] image={requested} attempt={attempt}/{attempts} timeout={timeout}s\n')
+            log.flush()
+            self.event('image_pull_started', ref=requested, attempt=attempt, attempts=attempts)
+            try:
+                self.run(['docker', 'pull', requested], stdout=log, stderr=subprocess.STDOUT,
+                         timeout=timeout)
+                self.event('image_pull_succeeded', ref=requested, attempt=attempt, attempts=attempts)
+                return
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+                kind = type(exc).__name__
+                self.event('image_pull_failed', ref=requested, attempt=attempt,
+                           attempts=attempts, error=kind)
+                log.write(f'[rq4-image-pull] attempt={attempt}/{attempts} failed={kind}\n')
+                log.flush()
+                if attempt == attempts:
+                    raise
+                if delay:
+                    time.sleep(delay * attempt)
+
     def image(self, ref, pin=None):
         requested = pin or ref
         self.ensure()
@@ -125,8 +152,7 @@ class Resources:
                 raise
             existing_ids = {i.id for i in self.client.images.list(all=True)}
             with (self.batch / 'image_pull.log').open('a') as log:
-                self.run(['docker', 'pull', requested], stdout=log, stderr=subprocess.STDOUT,
-                         timeout=int(os.getenv('RQ4_IMAGE_PULL_TIMEOUT', '1800')))
+                self.pull_image(requested, log)
             image = self.client.images.get(requested)
             # Mark ownership only after a successful pull; existing images are never adopted.
             if image.id not in existing_ids:

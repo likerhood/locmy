@@ -1,5 +1,6 @@
 import argparse
 import gzip
+import io
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,26 @@ def put(path,obj):
 
 
 class SerialTests(unittest.TestCase):
+    def test_image_pull_retries_timeout_and_reuses_docker_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            resource = Resources(Path(tmp), Path(tmp) / 'batch', min_free_gb=1)
+            resource.run = Mock(side_effect=[
+                subprocess.TimeoutExpired('docker', 30),
+                subprocess.CalledProcessError(1, 'docker'),
+                None,
+            ])
+            log = io.StringIO()
+            env = {'RQ4_IMAGE_PULL_TIMEOUT': '30', 'RQ4_IMAGE_PULL_RETRIES': '3',
+                   'RQ4_IMAGE_PULL_RETRY_DELAY': '0'}
+            with patch.dict(os.environ, env, clear=True):
+                resource.pull_image('org/image:tag', log)
+            self.assertEqual(resource.run.call_count, 3)
+            self.assertEqual(log.getvalue().count('[rq4-image-pull] image='), 3)
+            events = [json.loads(line)['event']
+                      for line in (Path(tmp) / 'batch/resources.jsonl').read_text().splitlines()]
+            self.assertEqual(events.count('image_pull_failed'), 2)
+            self.assertEqual(events.count('image_pull_succeeded'), 1)
+
     def test_git_cache_defaults_to_official_github_without_mirror(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(

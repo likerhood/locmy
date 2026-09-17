@@ -103,6 +103,7 @@ RQ4 涉及四条相互独立的网络路径，不能用一项“镜像”配置�
 - GitHub 源码默认使用 `RQ4_GITHUB_DIRECT=1`：加载 env 时会覆盖继承的镜像设置、将 `RQ4_GITHUB_MIRROR_PREFIX` 清空，并把 GitHub 下载主机追加到 `NO_PROXY`/`no_proxy`。配置由 pipeline 进程传给 setup、仓库缓存和修复子进程，不需要在终端手工 `export`；它不会修改父终端。若某台机器必须使用镜像，可显式设置 `RQ4_GITHUB_DIRECT=0` 和 `RQ4_GITHUB_MIRROR_PREFIX=https://...`。每次 clone/fetch 的真实错误保存在 `runs/batches/<run-id>/repo_clone.log`。评测镜像已经包含同一提交时，也可按上文工具核验后导入 Git 对象。该选择写入批次 manifest，改变后必须使用新 run-id。
 - Python 包和 Hugging Face 数据由宿主 Python/pip 下载，使用各自的 index、endpoint、代理或 `NO_PROXY` 配置；Docker registry mirror 对它们无效。
 - Docker Hub 镜像由 rootless Docker daemon 拉取，使用该 daemon 的 `daemon.json` registry mirror 或 systemd 代理。只有修改 daemon 配置后才需重启 Docker；普通实验重跑不需重启。
+- Docker 拉取默认最多尝试 3 次（`RQ4_IMAGE_PULL_RETRIES`），每次最长 1800 秒（`RQ4_IMAGE_PULL_TIMEOUT`）。失败后 Docker 已完成的层会被下一次尝试复用，尝试与失败原因同时写入 `image_pull.log` 和 `resources.jsonl`。
 
 ### CoSIL RQ3 对齐的下游修复协议
 

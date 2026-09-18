@@ -151,6 +151,32 @@ class OfficialEvalTests(unittest.TestCase):
             parsed,
         )
 
+    def test_calypso_dash_prefix_with_duplicate_descriptions_is_normalized(self):
+        spec = SimpleNamespace(
+            instance_id='Automattic__wp-calypso-30240',
+            FAIL_TO_PASS=[
+                '<SiteInformation /> - should render',
+                '<SiteVerticalsSuggestionSearch /> - should render',
+            ],
+            PASS_TO_PASS=[
+                '<SiteInformation /> - should call `submitStep()` from `handleSubmit()`',
+            ],
+        )
+        parsed = {
+            '- <SiteInformation /> - should render': 'PASSED',
+            '- <SiteVerticalsSuggestionSearch /> - should render': 'PASSED',
+            '- <SiteInformation /> - should call `submitStep()` from `handleSubmit()`': 'PASSED',
+            'unrelated parser output': 'FAILED',
+        }
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = parse_calypso_without_stray_brace('', spec, lambda *_: parsed)
+        self.assertTrue(all(result[test_id] == 'PASSED'
+                            for test_id in spec.FAIL_TO_PASS + spec.PASS_TO_PASS))
+        self.assertEqual(result['unrelated parser output'], 'FAILED')
+        self.assertNotIn('- <SiteInformation /> - should render', result)
+        self.assertIn('Removed stray dash suite prefix', output.getvalue())
+
 
 if __name__ == '__main__':
     unittest.main()

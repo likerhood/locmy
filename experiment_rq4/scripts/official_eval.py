@@ -39,6 +39,30 @@ def parse_calypso_without_stray_brace(log, test_spec, original):
     if not parsed or not expected or expected.issubset(parsed):
         return parsed
 
+    # A deleted line printed before Jest output can make the official parser
+    # treat a lone ``-`` as the outer suite name.  Prefer this exact,
+    # one-to-one repair before suffix matching: repeated descriptions such as
+    # ``should render`` are still unambiguous when the full expected test ID is
+    # retained after removing the literal prefix.
+    dash_sources = {}
+    for test_id in expected:
+        source = test_id if test_id in parsed else f'- {test_id}'
+        if source not in parsed:
+            break
+        dash_sources[test_id] = source
+    changed = sum(source != test_id for test_id, source in dash_sources.items())
+    if (changed and len(dash_sources) == len(expected)
+            and len(set(dash_sources.values())) == len(expected)):
+        corrected = dict(parsed)
+        for test_id, source in dash_sources.items():
+            if source != test_id:
+                corrected.pop(source)
+            corrected[test_id] = parsed[source]
+        print(f'[rq4] Removed stray dash suite prefix for {changed} Calypso '
+              f'test IDs for {test_spec.instance_id}; all {len(expected)} expected IDs matched.',
+              flush=True)
+        return corrected
+
     def common_component_suffix(actual, wanted):
         actual_parts = actual.split(' - ')
         wanted_parts = wanted.split(' - ')

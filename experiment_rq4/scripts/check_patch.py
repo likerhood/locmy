@@ -16,17 +16,18 @@ def main():
     parser.add_argument('--run-dir', type=Path, required=True)
     args = parser.parse_args()
     prediction = json.loads((args.run_dir / 'prediction.jsonl').read_text())
-    request_path = args.run_dir / 'repair_request.json'
-    if request_path.exists():
-        files = json.loads(request_path.read_text())['files']
-    else:
-        # Compatibility with K=1 development-smoke records.
-        request = json.loads((args.run_dir / 'request.json').read_text())
-        files = json.loads(request['messages'][1]['content'])['files']
     patch = prediction['model_patch']
     report = {'instance_id': prediction['instance_id'], 'nonempty': bool(patch),
               'applied': False, 'official_tests_run': False, 'resolved': None}
     if patch:
+        request_path = args.run_dir / 'repair_request.json'
+        if request_path.exists():
+            files = json.loads(request_path.read_text())['files']
+        else:
+            # Compatibility with K=1 development-smoke records. Empty-patch
+            # outcomes need no source files and return before this branch.
+            request = json.loads((args.run_dir / 'request.json').read_text())
+            files = json.loads(request['messages'][1]['content'])['files']
         with tempfile.TemporaryDirectory(prefix='rq4-patch-check-') as temp:
             root = Path(temp)
             subprocess.run(['git', 'init', '-q', temp], check=True)

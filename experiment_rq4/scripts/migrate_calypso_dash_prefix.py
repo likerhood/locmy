@@ -12,6 +12,7 @@ import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 ADAPTER = Path('scripts/official_eval.py')
+CONTENT_HASH_KEYS = {'evaluator_dataset'}
 
 
 def sha256(path):
@@ -75,6 +76,11 @@ def main():
         raise SystemExit(f'{ADAPTER} is not recorded in the batch manifest')
     mismatches = []
     for relative, recorded in hashes.items():
+        # These manifest entries identify caller-supplied content, not paths
+        # relative to ROOT. The normal batch resume validation compares their
+        # hashes again once the evaluator dataset path is supplied.
+        if relative in CONTENT_HASH_KEYS:
+            continue
         path = ROOT / relative
         if not path.is_file():
             mismatches.append((relative, recorded, '<missing>'))

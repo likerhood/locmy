@@ -1,11 +1,54 @@
 #!/usr/bin/env python3
 """Thin wrapper around the locked official SWE-bench run_instances API."""
 import argparse
+import base64
+import hashlib
 import json
+import re
 from pathlib import Path
 
+ASSET_BUNDLE_SHA256 = 'c6eb082a8ab7d66362981f24ebb2a9424940de86dc5219cd8f3df95210ac0a21'
 
-def run_with_git_mode(container, command, timeout, original, *, workdir, user):
+
+def bundled_assets():
+    """Evaluation-only bytes, pinned independently of mutable local caches."""
+    path = Path(__file__).resolve().parents[1] / 'data/evaluation_seed/chartjs_assets.json'
+    raw = path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != ASSET_BUNDLE_SHA256:
+        raise RuntimeError('Evaluation asset bundle checksum mismatch')
+    result = {}
+    for entry in json.loads(raw)['assets']:
+        data = base64.b64decode(entry['data_base64'], validate=True)
+        blob = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
+        if blob != entry['git_blob']:
+            raise RuntimeError('Evaluation asset Git blob mismatch')
+        result[(entry['instance_id'], entry['path'], entry['url'])] = data
+    return result
+
+
+def resolve_required_asset(asset, task_repo, logger, original, bundle):
+    key = (asset['instance_id'], asset['path'], asset.get('url'))
+    if key in bundle:
+        logger.info('Using verified bundled evaluation asset: %s', asset['path'])
+        return bundle[key]
+    data = original(asset, task_repo, logger)
+    if not data:
+        raise RuntimeError(f"Required evaluation asset unavailable: {asset['instance_id']} {asset['path']}")
+    return data
+
+
+def parse_complete_chartjs(log, test_spec, original):
+    """Fail closed: fail_only grading must not accept a disconnected partial suite."""
+    clean = re.sub(r'\x1b\[[0-9;]*m', '', log)
+    summaries = re.findall(r'Executed\s+(\d+)(?:\s+of\s+(\d+))?[^\r\n]*', clean)
+    n, total = summaries[-1] if summaries else ('0', '')
+    if (int(n) == 0 or (total and int(n) != int(total))
+            or re.search(r'DISCONNECTED|Disconnected|EACCES|Failed to execute .send. on .XMLHttpRequest.', clean)):
+        raise RuntimeError('Chart.js infrastructure failure: incomplete suite, browser disconnect, fixture access or permissions; refusing fail_only grading')
+    return original(log, test_spec)
+
+
+def run_with_git_mode(container, command, timeout, original, *, workdir, user, chartjs=False):
     """Ignore image-layer permission changes before the unchanged official eval.sh."""
     if command == '/bin/bash /eval.sh':
         result = container.exec_run(
@@ -20,6 +63,18 @@ def run_with_git_mode(container, command, timeout, original, *, workdir, user):
             )
         print('[rq4] Git file-mode tracking disabled in test container; '
               'official eval.sh unchanged.', flush=True)
+        if chartjs:
+            # Only writable report directories; never chmod the repository or host.
+            result = container.exec_run(
+                ['/bin/bash', '-ec',
+                 'id chromeuser >/dev/null; '
+                 'for p in /testbed/coverage /testbed/coverage/html /testbed/coverage/chrome; do '
+                 'test ! -L "$p"; '
+                 'install -d -m 0755 -o chromeuser -g "$(id -gn chromeuser)" "$p"; done'],
+                workdir=workdir, user=user,
+            )
+            if result.exit_code:
+                raise RuntimeError('Cannot prepare Chart.js coverage directories for chromeuser')
     return original(container, command, timeout)
 
 
@@ -104,6 +159,11 @@ def main():
     p.add_argument('--run-id',required=True)
     p.add_argument('--no-op',action='store_true')
     args=p.parse_args()
+    rows=[json.loads(x) for x in args.dataset.read_text().splitlines() if x]
+    predictions={r['instance_id']:r for r in map(json.loads,args.predictions.read_text().splitlines())}
+    rows=[r for r in rows if r['instance_id'] in predictions and
+          (args.no_op or predictions[r['instance_id']].get('model_patch'))]
+    chartjs = bool(rows) and all(r.get('repo') == 'chartjs/Chart.js' for r in rows)
     from swebench.harness import run_evaluation
     from swebench.harness.log_parsers import PARSER_REGISTRY
     if run_evaluation.CONTAINER_USER != 'root':
@@ -115,18 +175,22 @@ def main():
     def normalized_calypso(log, test_spec):
         return parse_calypso_without_stray_brace(log, test_spec, original_calypso)
     PARSER_REGISTRY['parse_log_calypso'] = normalized_calypso
+    bundle = bundled_assets()
+    asset_resolver = run_evaluation._resolve_asset_bytes
+    run_evaluation._resolve_asset_bytes = lambda asset, task_repo, logger: resolve_required_asset(
+        asset, task_repo, logger, asset_resolver, bundle)
+    original_chartjs = PARSER_REGISTRY['parse_log_chart_js']
+    PARSER_REGISTRY['parse_log_chart_js'] = lambda log, spec: parse_complete_chartjs(
+        log, spec, original_chartjs)
     original = run_evaluation.exec_run_with_timeout
     def normalized_exec(container, command, timeout):
         return run_with_git_mode(
             container, command, timeout, original,
             workdir=run_evaluation.CONTAINER_WORKDIR,
             user=run_evaluation.CONTAINER_USER,
+            chartjs=chartjs,
         )
     run_evaluation.exec_run_with_timeout = normalized_exec
-    rows=[json.loads(x) for x in args.dataset.read_text().splitlines() if x]
-    predictions={r['instance_id']:r for r in map(json.loads,args.predictions.read_text().splitlines())}
-    rows=[r for r in rows if r['instance_id'] in predictions and
-          (args.no_op or predictions[r['instance_id']].get('model_patch'))]
     if rows:
         run_evaluation.run_instances(
             predictions, rows, args.workers, args.run_id, args.timeout,

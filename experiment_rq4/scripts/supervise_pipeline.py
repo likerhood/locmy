@@ -78,6 +78,10 @@ def supervise(command, directory, interval=30):
                         previous_progress = progress
                 reader.join(timeout=5)
                 state = 'interrupted' if stop else 'completed' if code == 0 else 'failed'
+                if state == 'completed':
+                    batch = ROOT/'runs/batches'/directory.name
+                    if any((batch/'deferred_samples').glob('*.json')):
+                        state = 'completed_with_deferred'
                 code = 128+stop[0] if stop else code
                 status(state, code)
                 emit(f'[{state}] exit={code}; log={directory / "pipeline.log"}\n')

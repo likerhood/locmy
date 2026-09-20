@@ -30,6 +30,16 @@ def save(path, value):
 ACTIVE_RESOURCES = None
 
 
+class EvaluationBlocked(RuntimeError):
+    """An evaluation has no trustworthy outcome; never a repair success/failure."""
+
+
+def report_outcome(report, method, instance):
+    if report.get('infra_failure') is True:
+        raise EvaluationBlocked(f'{method}/{instance}: report marks infrastructure failure')
+    return report['resolved']
+
+
 def repo_for(sample):
     from git_cache import repo_for as cached
     return cached(ROOT, sample, ACTIVE_RESOURCES)
@@ -126,7 +136,7 @@ def evaluate_one(batch, args, sample, dataset_file, method, gold=None):
     instance = sample['instance_id']
     reports = official_reports(batch/'evaluation'/method)
     if instance in reports:
-        return reports[instance]['resolved']
+        return report_outcome(reports[instance], method, instance)
     if gold is not None:
         patch_text = sample['patch'] if gold else ''
     else:
@@ -146,11 +156,45 @@ def evaluate_one(batch, args, sample, dataset_file, method, gold=None):
     prediction_file.parent.mkdir(parents=True, exist_ok=True)
     prediction_file.write_text(json.dumps({'instance_id':instance, 'model_name_or_path':'rq4-'+method,
                                            'model_patch':patch_text})+'\n')
-    harness(batch, method, prediction_file, dataset_file, 1, args.test_timeout)
+    try:
+        harness(batch, method, prediction_file, dataset_file, 1, args.test_timeout)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise EvaluationBlocked(f'{method}/{instance}: evaluator process failed ({type(exc).__name__}); inspect harness.log') from exc
     report = official_reports(batch/'evaluation'/method).get(instance)
     if report is None:
-        raise RuntimeError(f'{method}/{instance}: official report missing; inspect harness.log')
-    return report['resolved']
+        raise EvaluationBlocked(f'{method}/{instance}: official report missing; inspect harness.log')
+    return report_outcome(report, method, instance)
+
+
+def process_sample(batch, args, sample, full, pins, testing):
+    instance = sample['instance_id']
+    if testing:
+        row = dict(full[instance])
+        # Image/storage/daemon errors retain the original stop behavior.
+        digest = ACTIVE_RESOURCES.image(row['image'], pins.get(instance))
+        pins[instance] = digest
+        save(batch/'image_pins.json', pins)
+        row['image'] = digest
+        dataset_file = batch/'eval_inputs'/instance/'dataset.jsonl'
+        dataset_file.parent.mkdir(parents=True, exist_ok=True)
+        dataset_file.write_text(json.dumps(row)+'\n')
+        for label, gold in [('control_noop', False), ('control_gold', True)]:
+            if evaluate_one(batch, args, row, dataset_file, label, gold=gold) is not gold:
+                save(batch/'control_failure.json', dict(instance_id=instance, control=label, expected_resolved=gold))
+                raise EvaluationBlocked(f'{instance}: {label} did not match expected result; no new repair calls')
+    for method in args.methods:
+        if args.mode in ['generate', 'all']:
+            one = argparse.Namespace(**vars(args))
+            one.methods = [method]
+            generate_one(batch, one, sample)
+        if testing:
+            if evaluate_one(batch, args, row, dataset_file, method) is None:
+                raise EvaluationBlocked(f'{method}/{instance}: no usable generated patch due to infrastructure failure')
+            analyze(batch)
+    if testing:
+        save(batch/'completed_samples'/f'{instance}.json', dict(image=digest, methods=args.methods))
+        ACTIVE_RESOURCES.finish_sample()
+    analyze(batch)
 
 
 def validate_eval(dataset_file, samples):
@@ -179,7 +223,11 @@ def main():
     p.add_argument('--test-timeout', type=int, default=1800)
     p.add_argument('--min-free-gb', type=float)
     p.add_argument('--image-cache', choices=['budget','sample'])
+    p.add_argument('--eval-failure-policy', choices=['stop', 'defer'], default='stop')
+    p.add_argument('--max-consecutive-eval-failures', type=int, default=3)
     args = p.parse_args()
+    if args.max_consecutive_eval_failures < 1:
+        p.error('--max-consecutive-eval-failures must be positive')
     load_env(args.env_file)
     args.min_free_gb = args.min_free_gb if args.min_free_gb is not None else float(os.getenv('RQ4_MIN_FREE_GB','10'))
     args.image_cache = args.image_cache or os.getenv('RQ4_IMAGE_CACHE','budget')
@@ -196,7 +244,7 @@ def main():
     source_paths = [ROOT/'configs/protocol.json', ROOT/'data/inputs'/f'{args.dataset}50.jsonl',
                     ROOT/'scripts/repair.py']
     source_paths += [ROOT/'scripts/preflight.py'] if (ROOT/'scripts/preflight.py').exists() else []
-    source_paths += [ROOT/'scripts'/name for name in ['run_batch.py','official_eval.py','resources.py','git_cache.py'] if (ROOT/'scripts'/name).exists()]
+    source_paths += [ROOT/'scripts'/name for name in ['run_batch.py','official_eval.py','resources.py','git_cache.py','analyze_batch.py'] if (ROOT/'scripts'/name).exists()]
     source_paths += [ROOT/'configs/harness_lock.json'] if (ROOT/'configs/harness_lock.json').exists() else []
     for method in args.methods:
         path = ROOT/'normalized'/args.dataset/f'{method}.jsonl'
@@ -254,6 +302,8 @@ def main():
             'api_direct':os.getenv('RQ4_API_DIRECT','').strip().lower() in ('1','true','yes'),
             'github_direct':os.getenv('RQ4_GITHUB_DIRECT','1').strip().lower() in ('1','true','yes'),
             'protocol':protocol.get('name','legacy_test_fixture'),'test_timeout':args.test_timeout}
+        if args.eval_failure_policy == 'defer':
+            manifest['evaluation_policy'] = dict(on_failure='defer', max_consecutive=args.max_consecutive_eval_failures)
         existing = batch/'manifest.json'
         if existing.exists():
             previous = json.loads(existing.read_text())
@@ -268,36 +318,37 @@ def main():
             ACTIVE_RESOURCES.ensure()
             pins_path = batch/'image_pins.json'
             pins = json.loads(pins_path.read_text()) if pins_path.exists() else {}
+            consecutive_failures = 0
             for sample in sorted(samples,key=lambda r:(r['repo'],r['instance_id'])):
                 instance = sample['instance_id']
                 marker = batch/'completed_samples'/f'{instance}.json'
+                deferred = batch/'deferred_samples'/f'{instance}.json'
                 if testing and marker.exists():
                     print(f'Skip fully evaluated sample {instance}',flush=True)
+                    consecutive_failures = 0
                     continue
-                if testing:
-                    row = dict(full[instance])
-                    digest = ACTIVE_RESOURCES.image(row['image'],pins.get(instance))
-                    pins[instance] = digest; save(pins_path,pins)
-                    row['image'] = digest
-                    dataset_file = batch/'eval_inputs'/instance/'dataset.jsonl'
-                    dataset_file.parent.mkdir(parents=True,exist_ok=True)
-                    dataset_file.write_text(json.dumps(row)+'\n')
-                    for label,gold in [('control_noop',False),('control_gold',True)]:
-                        if evaluate_one(batch,args,row,dataset_file,label,gold=gold) is not gold:
-                            save(batch/'control_failure.json',{'instance_id':instance,'control':label,'expected_resolved':gold})
-                            raise RuntimeError(f'{instance}: environment control failed; no new repair calls for this sample')
-                for method in args.methods:
-                    if args.mode in ['generate','all']:
-                        # Keep the original argument object intact while generating one method.
-                        one = argparse.Namespace(**vars(args)); one.methods=[method]
-                        generate_one(batch,one,sample)
-                    if testing:
-                        evaluate_one(batch,args,row,dataset_file,method)
-                        analyze(batch)
-                if testing:
-                    save(marker,{'image':digest,'methods':args.methods})
+                if testing and deferred.exists():
+                    if args.eval_failure_policy != 'defer':
+                        raise RuntimeError('Deferred samples exist; use the same defer policy or audited recovery')
+                    print(f'Skip deferred evaluation {instance}; evidence preserved', flush=True)
+                    consecutive_failures += 1
+                    continue
+                try:
+                    process_sample(batch, args, sample, full, pins, testing)
+                    consecutive_failures = 0
+                except EvaluationBlocked as exc:
+                    if args.eval_failure_policy != 'defer':
+                        raise
+                    save(deferred, dict(instance_id=instance, status='deferred_evaluation',
+                                        reason=str(exc), error_type=type(exc).__name__,
+                                        updated_at=time.time(), methods=args.methods,
+                                        note='No valid complete comparison. Preserve all logs/API records; no automatic retry.'))
                     ACTIVE_RESOURCES.finish_sample()
-                analyze(batch)
+                    analyze(batch)
+                    consecutive_failures += 1
+                    print(f'[deferred] {instance}: {exc}', flush=True)
+                    if consecutive_failures >= args.max_consecutive_eval_failures:
+                        raise RuntimeError('Consecutive evaluation failure limit reached; inspect shared environment')
             (batch/'paused.json').unlink(missing_ok=True)
             (batch/'control_failure.json').unlink(missing_ok=True)
         except Exception as exc:

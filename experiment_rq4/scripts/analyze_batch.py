@@ -22,6 +22,8 @@ def analyze(batch):
     manifest = json.loads((batch / 'manifest.json').read_text())
     rows, summaries = [], []
     outcomes = {}
+    deferred = {i: json.loads((batch/'deferred_samples'/f'{i}.json').read_text())
+                for i in manifest['instance_ids'] if (batch/'deferred_samples'/f'{i}.json').exists()}
     for method in manifest['methods']:
         reports = official_reports(batch / 'evaluation' / method)
         method_rows = []
@@ -34,9 +36,13 @@ def analyze(batch):
             # Explicit completed generation with no patch is a known system failure.
             if result is None and record.get('status') == 'completed' and not pred.get('model_patch') and pred.get('status') in (None, 'empty_patch', 'missing_localization'):
                 resolved = False
+            if instance in deferred or (result and result.get('infra_failure') is True):
+                resolved = None
             usage = pred.get('usage') or {}
             candidate_outcomes = pred.get('candidate_outcomes') or {}
             row = {'method': method, 'instance_id': instance, 'status': record['status'],
+                   'evaluation_deferred': instance in deferred,
+                   'deferred_reason': deferred.get(instance, {}).get('reason', ''),
                    'generated': bool(pred.get('model_patch')), 'applied_check': record.get('applied'),
                    'fine_localization': pred.get('fine_localization_status'),
                    'candidate_count': pred.get('candidate_count', 0),
@@ -86,12 +92,16 @@ def analyze(batch):
                 counts[key] += 1
             paired.append({'baseline': method, **counts})
     report = {'manifest': manifest, 'summary': summaries, 'paired': paired,
+              'deferred_samples': deferred,
+              'coverage': {'planned': len(manifest['instance_ids']), 'deferred': len(deferred),
+                           'completed': sum((batch/'completed_samples'/f'{i}.json').exists() for i in manifest['instance_ids'])},
               'note': 'Token/time include shared fine localization and repair candidates, but not the frozen upstream file/function localization cost. Missing official evaluation stays unknown.'}
     (batch / 'analysis.json').write_text(json.dumps(report, indent=2) + '\n')
     with (batch / 'per_instance.csv').open('w', newline='') as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader(); writer.writerows(rows)
     lines = ['# RQ4 batch analysis', '', 'Unknown means no final test conclusion; lower bound is NOT a completed resolved rate.', '',
+             f'Deferred evaluations: {len(deferred)} / {len(manifest["instance_ids"])}. These remain unknown for every method.', '',
              '| Method | N | Generated | Missing localization | Candidates | Valid candidates | API failures | Unique patches | Applied check | Solved | Unknown | Resolved% | Tokens |',
              '|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in summaries:

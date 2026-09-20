@@ -78,6 +78,7 @@ def snapshot(root, directory, pid):
         manifest=json.loads((batch/'manifest.json').read_text())
         data['total_samples']=len(manifest['instance_ids'])
         data['completed_samples']=sum((batch/'completed_samples'/f'{i}.json').exists() for i in manifest['instance_ids'])
+        data['deferred_samples']=sum((batch/'deferred_samples'/f'{i}.json').exists() for i in manifest['instance_ids'])
     except (OSError,ValueError,KeyError): pass
     candidates=[]
     if method and stage.startswith(('No-patch','Gold-patch','Official patch')):
@@ -99,6 +100,8 @@ def snapshot(root, directory, pid):
 def render(data, previous=None):
     total=data['total_samples'] if data['total_samples'] is not None else '?'
     lines=[f"[progress] samples={data['completed_samples']}/{total} | {data['stage']} | pid={data['active_pid']}"]
+    if data.get('deferred_samples'):
+        lines.append(f"  deferred={data['deferred_samples']} (not completed; inspect analysis.md)")
     if data['instance'] or data['method']:
         lines.append(f"  instance={data['instance']} method={data['method']}")
     logs=data['logs']
@@ -126,6 +129,10 @@ def main():
     print('Pipeline:',status['state'],' Updated:',status['updated_at'])
     if status['state'] in ('running','stopping'):
         print(render(snapshot(ROOT,directory,status['child_pid'])),end='')
+    elif status['state'] == 'completed_with_deferred':
+        print('Scheduling finished with deferred evaluations; NOT all samples evaluated. See batch analysis.md.')
+        if status.get('progress'):
+            print(render(status['progress']), end='')
     else: print('Pipeline exited. See pipeline.log and batch analysis.md.')
 
 

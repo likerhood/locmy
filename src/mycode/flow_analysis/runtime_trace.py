@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import flow_backend
 
 import re
 from collections import defaultdict
@@ -125,6 +126,7 @@ def _trace_type(text: str, issue_text: str, queries: Iterable[str] | None) -> st
     return "runtime_trace_execution_path"
 
 
+@flow_backend
 def verify_runtime_traces(
     index: RepositoryIndex,
     *,

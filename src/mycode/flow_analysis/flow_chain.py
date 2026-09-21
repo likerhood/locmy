@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import flow_backend
 
 import re
 from collections import defaultdict
@@ -681,6 +682,7 @@ def _source_sink_steps(steps: list[dict[str, Any]], candidate_paths: list[str]) 
     return source, sink
 
 
+@flow_backend
 def trace_flow_chains(
     index: RepositoryIndex,
     *,

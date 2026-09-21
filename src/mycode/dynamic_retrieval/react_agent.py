@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 import json
 import os
@@ -77,9 +78,10 @@ def _merge_frontier(previous: Iterable[str], observed: Iterable[str], *, limit: 
 
 
 def _required_tool_order(issue_sketch: IssueSketch) -> list[str]:
-    if str(getattr(issue_sketch, "task_type", "unknown")) == "feature_request":
-        return ["SearchAnchor", "ReadCode", "NavigateCode", "TraceFlow"]
-    return ["SearchAnchor", "NavigateCode", "TraceFlow", "ReadCode"]
+    order = (["SearchAnchor", "ReadCode", "NavigateCode", "TraceFlow"]
+             if str(getattr(issue_sketch, "task_type", "unknown")) == "feature_request"
+             else ["SearchAnchor", "NavigateCode", "TraceFlow", "ReadCode"])
+    return [tool for tool in order if tool in ablation().tools()]
 
 
 def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
@@ -144,11 +146,17 @@ def _planner_prompt(
     history: list[dict[str, Any]],
 ) -> str:
     completed_signatures = [str(item.get("action_signature") or "") for item in history if item.get("action_signature")]
+    tool_instruction = "Available tools: SearchAnchor, NavigateCode, TraceFlow, ReadCode.\n"
+    if not ablation().graph or not ablation().flow:
+        tool_instruction = (
+            f"Available tools: {', '.join(ablation().tools())}. Unavailable tools must not be requested. "
+            "Missing disabled evidence is not counterevidence.\n"
+        )
     return (
         "You are the evidence-gap controller for repository issue localization. Choose exactly one action "
         "that resolves the highest-priority missing evidence, or stop when no required gap remains.\n"
         "Return compact JSON with keys: tool, mode, queries, resolves_gap, decision_basis, stop, stop_reason.\n"
-        "Available tools: SearchAnchor, NavigateCode, TraceFlow, ReadCode.\n"
+        f"{tool_instruction}"
         "SearchAnchor finds concern/entity/effect anchors.\n"
         "NavigateCode modes: concern, call, used_by.\n"
         "TraceFlow validates state/parameter/effect propagation.\n"
@@ -372,6 +380,10 @@ def run_react_tool_agent(
     asks for an unknown tool, the controller falls back to the heuristic policy.
     """
 
+    config = ablation()
+    fixed_policy = config.arm == "fixed_react"
+    if fixed_policy:
+        planner_llm = None
     steps: list[ReActStep] = []
     observations: list[DynamicToolObservation] = []
     candidate_paths = _dedupe(previous_candidates or [], limit=80)
@@ -394,7 +406,7 @@ def run_react_tool_agent(
         }
         coverage_complete = not enforce_coverage or all(tool in used_tools for tool in required_order)
         no_gain_limit = _env_int("MYCODE_REACT_NO_GAIN_STEPS", 2, minimum=1)
-        if coverage_complete and consecutive_no_gain >= no_gain_limit:
+        if not fixed_policy and coverage_complete and consecutive_no_gain >= no_gain_limit:
             stop_reason = "evidence_plateau_after_tool_coverage"
             steps.append(
                 ReActStep(
@@ -439,7 +451,11 @@ def run_react_tool_agent(
                 }
                 llm_raw = repr(exc)
 
-        if str(move.get("tool") or "") not in {"SearchAnchor", "NavigateCode", "TraceFlow", "ReadCode", "Stop"}:
+        if fixed_policy:
+            move = {"tool": required_order[(step_no - 1) % len(required_order)],
+                    "mode": "call", "queries": list(queries), "stop": False,
+                    "thought": "Fixed tool cycle with initial queries; no ReAct planner call."}
+        if str(move.get("tool") or "") not in set(config.tools()) | {"Stop"}:
             fallback = _heuristic_move(
                 step_no=step_no,
                 issue_sketch=issue_sketch,
@@ -448,6 +464,8 @@ def run_react_tool_agent(
             )
             fallback["planner_fallback_reason"] = "missing_or_unknown_tool"
             move = {**fallback, **{k: v for k, v in move.items() if k == "thought" and v}}
+            if move.get("tool") not in set(config.tools()) | {"Stop"}:
+                move.update(tool="ReadCode", mode="read", stop=False)
 
         if enforce_coverage:
             used_tools = [str(item.get("tool") or "") for item in planner_history]
@@ -487,7 +505,7 @@ def run_react_tool_agent(
             [str(move.get("tool") or ""), str(move.get("mode") or ""), *action_query_keys]
         )
         if (
-            action_signature in seen_action_signatures
+            not fixed_policy and action_signature in seen_action_signatures
             and planner_history
             and bool(planner_history[-1].get("no_evidence_gain"))
         ):
@@ -570,6 +588,8 @@ def run_react_tool_agent(
                 ],
                 limit=180,
             )
+        if fixed_policy:
+            active_queries = _dedupe(queries, limit=160)
         evidence_gain_count = new_candidate_count + new_read_count + new_flow_count
         no_evidence_gain = evidence_gain_count == 0
         consecutive_no_gain = consecutive_no_gain + 1 if no_evidence_gain else 0

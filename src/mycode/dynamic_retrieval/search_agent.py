@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 import copy
 import os
@@ -2114,6 +2115,8 @@ def _run_flow_backends_layered(
     max_rounds: int,
     flow_limit: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not ablation().flow:
+        return [], {"mode": "disabled_by_ablation", "backend_timings": [], "deep_flow_enabled": False}
     tool_observations = evidence_result.get("tool_observations", []) or []
     timings: list[dict[str, Any]] = []
 
@@ -3976,7 +3979,7 @@ def _precision_rerank_locations(
     removes candidates; it only changes the order of the selected recall set.
     """
 
-    if not ranked or not _env_bool("MYCODE_PRECISION_RERANK", True):
+    if not ranked or ablation().arm == "no_head" or not _env_bool("MYCODE_PRECISION_RERANK", True):
         return ranked[:top_k], {"enabled": False, "reason": "disabled_or_empty"}
 
     candidate_paths = {_norm_path(item.path) for item in ranked[:top_k]}
@@ -6264,6 +6267,10 @@ def _build_modification_closure(
     required issue/flow obligation?
     """
 
+    if ablation().arm == "no_closure":
+        return {"status": "disabled_by_ablation", "complete": False, "files": [],
+                "candidates": [], "obligations": [], "coverage": {}, "trace": [],
+                "rounds_run": 0, "patch_set_applicable": False}
     limit = _env_int("MYCODE_FINAL_PATCH_SET_LIMIT", 6, minimum=1)
     max_rounds = _env_int("MYCODE_CLOSURE_MAX_ROUNDS", 3, minimum=1)
     expand_per_round = _env_int("MYCODE_CLOSURE_EXPAND_PER_ROUND", 2, minimum=1)
@@ -6726,7 +6733,7 @@ def _save_dynamic_localization_checkpoint(
     if not rounds:
         return
     final_round = rounds[-1]
-    use_best = _env_bool("MYCODE_BEST_ROUND_CHECKPOINT", True)
+    use_best = ablation().arm != "no_checkpoint" and _env_bool("MYCODE_BEST_ROUND_CHECKPOINT", True)
     selected_round = best_round if use_best and best_round is not None else final_round
     flow_traces = _merge_flow_traces(*(item.flow_traces for item in rounds))[:34]
     round_selection = {
@@ -7343,7 +7350,7 @@ def dynamic_localize(
         active_queries = _dedupe(queries + search_round.next_queries)
 
     final_round = rounds[-1]
-    use_checkpoint = _env_bool("MYCODE_BEST_ROUND_CHECKPOINT", True)
+    use_checkpoint = ablation().arm != "no_checkpoint" and _env_bool("MYCODE_BEST_ROUND_CHECKPOINT", True)
     selected_round = best_round if use_checkpoint and best_round is not None else final_round
     ranked = selected_round.ranked_locations
     ranked_modules = selected_round.ranked_modules

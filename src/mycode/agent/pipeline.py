@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 from typing import Any, Dict
 
@@ -78,6 +79,8 @@ def run_localization_pipeline(
     lightweight: bool = False,
     auto_fetch_repos: bool = False,
 ) -> Dict[str, Any]:
+    experiment = ablation().to_dict()
+    phase_event("progress", "ablation", **experiment)
     phase_event(
         "start",
         "pipeline",
@@ -231,6 +234,8 @@ def run_localization_pipeline(
         "dataset": sample.dataset,
         "status": localization.get("status", "ok"),
         "problem_statement_only": evidence.get("problem_statement_only") is True,
+        "ablation": experiment,
+        "final_patch_set_applicable": ablation().arm != "no_closure",
         "llm_controller_used": controller_llm is not None,
         "lightweight_localization": lightweight,
         "evidence": evidence,

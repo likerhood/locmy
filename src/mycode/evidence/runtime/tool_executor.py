@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 import hashlib
 import json
@@ -54,6 +55,9 @@ def execute_tool_request(
     base_commit: str = "",
     expected_repo: str = "",
 ) -> ToolObservation:
+    if request.tool == "vlm_image_inspector" and not ablation().visual:
+        return ToolObservation(tool=request.tool, source=request.source, success=True,
+                               status="disabled_by_ablation", extracted={})
     root = Path(cache_dir)
     root.mkdir(parents=True, exist_ok=True)
     errors: List[str] = []

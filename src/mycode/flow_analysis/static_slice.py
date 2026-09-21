@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import flow_backend
 
 import ast
 import re
@@ -481,6 +482,7 @@ def _candidate_paths(nodes: list[StatementNode], edges: list[dict[str, Any]]) ->
     return [path for path, score in ranked if score > 0][:24]
 
 
+@flow_backend
 def trace_static_slices(
     index: RepositoryIndex,
     *,

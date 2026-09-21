@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import flow_backend
 
 import ast
 import re
@@ -355,6 +356,7 @@ def _edge(
     }
 
 
+@flow_backend
 def trace_interprocedural_flows(
     index: RepositoryIndex,
     *,

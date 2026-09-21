@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import flow_backend
 
 import ast
 import re
@@ -325,6 +326,7 @@ def _classify_flow(term: str, statements: list[dict[str, Any]], edges: list[dict
     return "parameter_statement_flow"
 
 
+@flow_backend
 def trace_statement_flows(
     index: RepositoryIndex,
     *,

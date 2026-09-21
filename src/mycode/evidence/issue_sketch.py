@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 import re
 from dataclasses import asdict, dataclass, field
@@ -747,7 +748,7 @@ def build_issue_sketch(sample: NormalizedSample, evidence_result: dict[str, Any]
             reason=str(item.get("description") or "Role inferred by evidence-understanding LLM."),
             metadata={"provenance": "llm_understanding"},
         )
-    obligations = _flow_obligations(text, states, concerns, effects, repo=sample.repo)
+    obligations = _flow_obligations(text, states, concerns, effects, repo=sample.repo) if ablation().flow else []
     navigation_hints = list(hints)
     hypotheses = [
         {

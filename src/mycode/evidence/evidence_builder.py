@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 import re
 from collections import Counter
@@ -56,6 +57,8 @@ def build_concern_queries(text: str, repo: str, limit: int = 16) -> list[str]:
 
 
 def build_flow_hypotheses(text: str) -> list[str]:
+    if not ablation().flow:
+        return []
     lower = (text or "").lower()
     hypotheses = []
     if any(k in lower for k in ("redirect", "url", "link", "route", "href")):
@@ -77,7 +80,7 @@ def build_evidence_sketch(sample: NormalizedSample) -> EvidenceSketch:
     urls = [classify_url(url) for url in collect_urls(sample)]
     images = [
         classify_image(url, source_field=source, issue_text=sample.issue_text)
-        for url, source in extract_image_urls({}, sample.issue_text)
+        for url, source in (extract_image_urls({}, sample.issue_text) if ablation().visual else [])
     ]
     return EvidenceSketch(
         instance_id=sample.instance_id,

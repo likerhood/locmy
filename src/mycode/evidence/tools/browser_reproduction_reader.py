@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 import json
 import posixpath
@@ -550,7 +551,8 @@ def _read_with_playwright(
         )
         preview_frames = _extract_preview_frames(page)
         html_path.write_text(page.content(), encoding="utf-8")
-        page.screenshot(path=str(screenshot), full_page=True)
+        if ablation().visual:
+            page.screenshot(path=str(screenshot), full_page=True)
 
         interaction_trace: List[Dict[str, Any]] = []
         snapshots: List[Dict[str, Any]] = [
@@ -601,7 +603,8 @@ def _read_with_playwright(
                 except Exception as exc:  # noqa: BLE001
                     interaction_trace.append({"action": "click_center", "error": str(exc)})
             try:
-                page.screenshot(path=str(after_screenshot), full_page=True)
+                if ablation().visual:
+                    page.screenshot(path=str(after_screenshot), full_page=True)
             except Exception:
                 after_screenshot = screenshot
         snapshots.append(
@@ -620,8 +623,8 @@ def _read_with_playwright(
         "visible_text_preview": " ".join(visible_text.split())[:4000],
         "console_logs": console_logs[:80],
         "page_errors": page_errors[:40],
-        "screenshot": str(screenshot),
-        "after_interaction_screenshot": str(after_screenshot) if after_screenshot.exists() else None,
+        "screenshot": str(screenshot) if ablation().visual else None,
+        "after_interaction_screenshot": str(after_screenshot) if ablation().visual and after_screenshot.exists() else None,
         "html_path": str(html_path),
         "file_tree_candidates": file_tree_candidates,
         "dom_source_files": [

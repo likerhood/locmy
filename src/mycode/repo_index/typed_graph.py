@@ -140,7 +140,9 @@ class TypedRepositoryGraph:
         self.scope_paths: set[str] | None = scope or None
         self.graph_files = sorted(self.scope_paths) if self.scope_paths is not None else sorted(self.index.files)
         self.file_languages = {path: _path_language(path) for path in self.graph_files}
-        self._build()
+        from mycode.ablation import ablation
+        if ablation().graph:
+            self._build()
 
     @property
     def edges(self) -> Mapping[str, Set[str]]:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import flow_backend
 
 import re
 from collections import defaultdict
@@ -267,6 +268,7 @@ def _candidate_target_paths(locations: list[dict[str, Any]]) -> list[str]:
     )[:20]
 
 
+@flow_backend
 def trace_program_flows(
     index: RepositoryIndex,
     *,

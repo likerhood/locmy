@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import flow_backend
 
 import re
 from collections import defaultdict
@@ -352,6 +353,7 @@ def _target_paths_from_roles(locations: list[dict[str, Any]]) -> list[str]:
     return paths[:16]
 
 
+@flow_backend
 def trace_parameter_closures(
     index: RepositoryIndex,
     *,

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from mycode.ablation import ablation
 
 import re
 import os
@@ -396,6 +397,9 @@ class NavigateCodeTool:
         self.graph = graph
 
     def run(self, seed_files: list[str], queries: list[str], *, mode: str, limit: int = 20) -> DynamicToolObservation:
+        if not ablation().graph:
+            return DynamicToolObservation(tool="NavigateCode", action="disabled",
+                                          status="disabled_by_ablation")
         with phase_context("four_tool.NavigateCode", tool="NavigateCode", mode=mode, seed_count=len(seed_files), limit=limit):
             allowed_edges = self.EDGE_GROUPS.get(mode, self.EDGE_GROUPS["concern"] + self.EDGE_GROUPS["call"])
             hits = self.graph.expand(seed_files, queries, limit=limit, allowed_edge_types=allowed_edges)
@@ -448,6 +452,9 @@ class TraceFlowTool:
         *,
         limit: int = 10,
     ) -> DynamicToolObservation:
+        if not ablation().flow:
+            return DynamicToolObservation(tool="TraceFlow", action="disabled",
+                                          status="disabled_by_ablation")
         flow_queries = _dedupe(queries + sketch_query_terms(issue_sketch), limit=120)
         mode = os.environ.get("MYCODE_FLOW_MODE", "auto").strip().lower()
         obligation_types = {

@@ -20,6 +20,7 @@ from mycode.evidence.tools.llm_client import (
     first_text,
     model_for_stage,
 )
+from mycode.evidence.tools.json_response import parse_json_response
 from mycode.schemas.evidence import (
     EvidenceCollectionPlan,
     EvidencePacket,
@@ -329,10 +330,13 @@ def _llm_followup_requests(
     ]
     response = chat_completion(messages, model=model_for_stage("evidence"), max_tokens=max_tokens)
     text = first_text(response)
-    try:
-        parsed: Dict[str, Any] = json.loads(text)
-    except json.JSONDecodeError:
+    parsed, parse_diagnostics = parse_json_response(
+        text,
+        required_keys=("additional_tool_requests", "reasoning", "stop_reason"),
+    )
+    if not parsed:
         parsed = {"raw_text": text, "additional_tool_requests": []}
+    parsed["_json_parse"] = parse_diagnostics
     additions: List[ToolRequest] = []
     local_code_hints: List[str] = []
     rejected_requests: List[Dict[str, Any]] = []

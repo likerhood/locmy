@@ -8,6 +8,8 @@ import os
 import re
 from typing import Any, Callable, Iterable
 
+from mycode.evidence.tools.json_response import parse_json_response
+
 
 CandidateReviewLLM = Callable[..., dict[str, Any] | str]
 
@@ -69,26 +71,8 @@ def _response_text(value: dict[str, Any] | str) -> str:
 
 
 def _json_object(text: str) -> dict[str, Any]:
-    text = str(text or "").strip()
-    if not text:
-        return {}
-    fenced = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.IGNORECASE | re.DOTALL).strip()
-    try:
-        value = json.loads(fenced)
-        return value if isinstance(value, dict) else {}
-    except json.JSONDecodeError:
-        pass
-    decoder = json.JSONDecoder()
-    for index, char in enumerate(fenced):
-        if char != "{":
-            continue
-        try:
-            value, _end = decoder.raw_decode(fenced[index:])
-        except json.JSONDecodeError:
-            continue
-        if isinstance(value, dict):
-            return value
-    return {}
+    parsed, _diagnostics = parse_json_response(text)
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _partial_review_object(text: str) -> dict[str, Any]:

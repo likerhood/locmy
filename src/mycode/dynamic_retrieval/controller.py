@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Iterable
 
 from mycode.repo_index.structure_index import tokenize
+from mycode.evidence.tools.json_response import parse_json_response
 
 
 LLMController = Callable[[str], str | dict[str, Any]]
@@ -398,28 +399,14 @@ def _parse_llm_decisions(value: str | dict[str, Any]) -> list[ControllerDecision
                 if choices:
                     message = choices[0].get("message") or {}
                     text = str(message.get("content") or message.get("reasoning_content") or "").strip()
-            try:
-                data = json.loads(text) if text else {}
-            except json.JSONDecodeError:
-                match = re.search(r"(?:\[.*\]|\{.*\})", text, flags=re.DOTALL)
-                if not match:
-                    return []
-                try:
-                    data = json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    return []
+            data, _diagnostics = parse_json_response(text, allow_list=True)
+            if not data:
+                return []
     else:
         text = str(value or "").strip()
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError:
-            match = re.search(r"(?:\[.*\]|\{.*\})", text, flags=re.DOTALL)
-            if not match:
-                return []
-            try:
-                data = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                return []
+        data, _diagnostics = parse_json_response(text, allow_list=True)
+        if not data:
+            return []
     decisions = data.get("decisions") if isinstance(data, dict) else data if isinstance(data, list) else None
     if not isinstance(decisions, list):
         return []

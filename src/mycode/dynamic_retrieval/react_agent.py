@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from mycode.dynamic_retrieval.controller import LLMController
+from mycode.evidence.tools.json_response import parse_json_response
 from mycode.dynamic_retrieval.tools import (
     DynamicToolObservation,
     NavigateCodeTool,
@@ -203,31 +204,13 @@ def _parse_planner_response(response: str | dict[str, Any]) -> tuple[dict[str, A
         text = str(content or "").strip()
         if not text:
             return {}, json.dumps(response, ensure_ascii=False)
-        try:
-            return json.loads(text), text
-        except json.JSONDecodeError:
-            start = text.find("{")
-            end = text.rfind("}")
-            if start >= 0 and end > start:
-                try:
-                    return json.loads(text[start : end + 1]), text
-                except json.JSONDecodeError:
-                    pass
-        return {"thought": text[:500]}, text
+        parsed, _diagnostics = parse_json_response(text)
+        return (parsed, text) if parsed else ({"thought": text[:500]}, text)
     text = str(response or "").strip()
     if not text:
         return {}, ""
-    try:
-        return json.loads(text), text
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start >= 0 and end > start:
-            try:
-                return json.loads(text[start : end + 1]), text
-            except json.JSONDecodeError:
-                pass
-    return {"thought": text[:500]}, text
+    parsed, _diagnostics = parse_json_response(text)
+    return (parsed, text) if parsed else ({"thought": text[:500]}, text)
 
 
 def _heuristic_move(

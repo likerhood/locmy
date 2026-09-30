@@ -12,6 +12,7 @@ from mycode.evidence.tools.llm_client import (
 )
 from mycode.evidence.tools.reproduction_extractor import extract_reproduction
 from mycode.evidence.tools.url_inspector import inspect_url
+from mycode.evidence.tools.json_response import parse_json_response
 from mycode.schemas.evidence import (
     EvidenceCollectionPlan,
     EvidenceSketch,
@@ -232,10 +233,10 @@ def _llm_planning(sketch: EvidenceSketch, plan: EvidenceCollectionPlan, max_toke
     ]
     response = chat_completion(messages, model=model_for_stage("planning"), max_tokens=max_tokens)
     text = first_text(response)
-    try:
-        parsed: Dict[str, Any] = json.loads(text)
-    except json.JSONDecodeError:
+    parsed, parse_diagnostics = parse_json_response(text)
+    if not parsed:
         parsed = {"raw_text": text}
+    parsed["_json_parse"] = parse_diagnostics
     parsed["_llm_response_id"] = response.get("id")
     parsed["_model"] = response.get("model")
     parsed["_usage"] = response.get("usage")

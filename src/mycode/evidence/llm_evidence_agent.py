@@ -8,6 +8,7 @@ from mycode.evidence.tools.llm_client import (
     first_text,
     model_for_stage,
 )
+from mycode.evidence.tools.json_response import parse_json_response
 from mycode.schemas.evidence import EvidencePacket, ToolObservation
 
 
@@ -294,10 +295,10 @@ def analyze_evidence_with_llm(
     response = chat_completion(messages, model=model_for_stage("evidence"), max_tokens=max_tokens)
     text = first_text(response)
     parsed: Dict[str, Any]
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
+    parsed, parse_diagnostics = parse_json_response(text)
+    if not parsed:
         parsed = {"raw_text": text}
+    parsed["_json_parse"] = parse_diagnostics
     parsed = normalize_llm_evidence_analysis(parsed, packet)
     parsed["_llm_response_id"] = response.get("id")
     parsed["_model"] = response.get("model")

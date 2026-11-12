@@ -21,12 +21,14 @@ from mycode.dynamic_retrieval.search_agent import (
     _rank_entities,
     _round_checkpoint_quality,
     _path_role,
+    _partial_closure_fallback,
 )
 from mycode.evidence.issue_sketch import build_issue_sketch
 from mycode.repo_index import structure_index
 from mycode.repo_index.structure_index import RepositoryIndex
 from mycode.repo_index.typed_graph import TypedRepositoryGraph
 from mycode.schemas.evidence import NormalizedSample
+from mycode.utils.model_profile import active_model_profile
 
 
 class _Sketch:
@@ -44,6 +46,96 @@ class _Sketch:
             "states": ["empty line"],
             "expected_effects": ["preserve empty lines"],
         }
+
+
+def _owner_review_response(paths: list[tuple[str, str]]) -> str:
+    candidates = []
+    for path, role in paths:
+        verified = role == "patch_target"
+        candidates.append(
+            {
+                "path": path,
+                "role": role,
+                "confidence": 0.95 if verified else 0.6,
+                "rationale": "owns the failing operation" if verified else "only routes to the owner",
+                "evidence_quote": "return broken(value);" if verified else "return owner(value);",
+                "mechanism_verified": verified,
+                "patch_mechanism": "broken transforms the input incorrectly" if verified else "",
+                "counterevidence": [] if verified else ["navigation_only"],
+                "matched_issue_axes": ["concern", "flow"],
+                "entities": [{"kind": "function", "name": "broken" if verified else "route"}],
+            }
+        )
+    return json.dumps(
+        {
+            "candidates": candidates,
+            "continue_search": False,
+            "missing_evidence": [],
+            "next_queries": [],
+        }
+    )
+
+
+def test_kimi_owner_contrast_rejects_two_verified_primary_heads() -> None:
+    paths = ["src/first.py", "src/second.py"]
+    ranked = [RankedLocation(path=path, score=100.0 - index) for index, path in enumerate(paths)]
+    contexts = [
+        {
+            "path": path,
+            "entities": [{"kind": "function", "name": "broken"}],
+            "snippets": [{"text": "def broken(value): return broken(value);"}],
+        }
+        for path in paths
+    ]
+    review = review_candidates(
+        llm=lambda _prompt: _owner_review_response([(path, "patch_target") for path in paths]),
+        issue_text="broken transforms the input incorrectly",
+        issue_sketch=_Sketch(),
+        ranked=ranked,
+        code_contexts=contexts,
+        flow_traces=[{"candidate_target_paths": paths, "flow_type": "dataflow"}],
+        round_no=1,
+        model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "kimi"}),
+    )
+
+    assert review["owner_contrast_complete"] is False
+    assert review["ambiguous_verified_competitors"] == 1
+    assert review["continue_search"] is True
+    assert review["stop_ready"] is False
+
+
+def test_kimi_owner_contrast_accepts_one_owner_and_navigation_candidate() -> None:
+    paths = ["src/owner.py", "src/router.py"]
+    ranked = [RankedLocation(path=path, score=100.0 - index) for index, path in enumerate(paths)]
+    contexts = [
+        {
+            "path": "src/owner.py",
+            "entities": [{"kind": "function", "name": "broken"}],
+            "snippets": [{"text": "def broken(value): return broken(value);"}],
+        },
+        {
+            "path": "src/router.py",
+            "entities": [{"kind": "function", "name": "route"}],
+            "snippets": [{"text": "def route(value): return owner(value);"}],
+        },
+    ]
+    review = review_candidates(
+        llm=lambda _prompt: _owner_review_response(
+            [("src/owner.py", "patch_target"), ("src/router.py", "navigation_only")]
+        ),
+        issue_text="broken transforms the input incorrectly",
+        issue_sketch=_Sketch(),
+        ranked=ranked,
+        code_contexts=contexts,
+        flow_traces=[{"candidate_target_paths": paths, "flow_type": "dataflow"}],
+        round_no=1,
+        model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "kimi"}),
+    )
+
+    assert review["verified_primary_heads"] == ["src/owner.py"]
+    assert review["owner_contrast_complete"] is True
+    assert review["continue_search"] is False
+    assert review["stop_ready"] is True
 
 
 def test_candidate_review_recovers_complete_candidate_from_truncated_json() -> None:
@@ -339,7 +431,20 @@ def test_partial_closure_excludes_top_level_documentation(
                 score_components={"flow_score": 8.0},
             ),
         ],
-        verifier={"llm_candidate_review": {"candidates": []}},
+        verifier={
+            "llm_candidate_review": {
+                "candidates": [
+                    {
+                        "path": source_path,
+                        "role": "supporting_target",
+                        "confidence": 0.8,
+                        "grounded": True,
+                        "quote_supported": True,
+                        "mechanism_verified": False,
+                    }
+                ]
+            }
+        },
         graph=TypedRepositoryGraph(index),
         issue_sketch=StyleSketch(),
         code_contexts=[
@@ -1272,6 +1377,135 @@ def test_candidate_review_exact_entity_improves_function_grounding() -> None:
         )
         assert functions[0].name == "loadStrings"
         assert any("llm_review_exact_entity" in reason for reason in functions[0].reasons)
+
+
+def test_kimi_verified_owner_boosts_exact_function_above_semantic_sibling() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source = root / "src/owner.js"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "function semanticHelper() { return 'loading preserve empty lines behavior'; }\n"
+            "export function exactOwner(value) { return value; }\n",
+            encoding="utf-8",
+        )
+        index = RepositoryIndex(repo="example/owner", instance_id="owner-boost", repo_root=root)
+        review = {
+            "status": "ok",
+            "candidates": [
+                {
+                    "path": "src/owner.js",
+                    "role": "patch_target",
+                    "confidence": 0.95,
+                    "grounded": True,
+                    "mechanism_verified": True,
+                    "entities": [{"kind": "function", "name": "exactOwner"}],
+                }
+            ],
+        }
+        _modules, functions = _rank_entities(
+            index=index,
+            ranked_files=[RankedLocation(path="src/owner.js", score=100.0)],
+            entity_hits=[],
+            flow_traces=[],
+            top_k=5,
+            candidate_review=review,
+            entity_queries=["loading preserve empty lines behavior"],
+            model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "kimi"}),
+        )
+
+        assert functions[0].name == "exactOwner"
+
+
+def test_default_profile_does_not_override_semantic_function_ordering() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        source = root / "src/owner.js"
+        source.parent.mkdir(parents=True)
+        source.write_text(
+            "function semanticHelper() { return 'loading preserve empty lines behavior'; }\n"
+            "export function exactOwner(value) { return value; }\n",
+            encoding="utf-8",
+        )
+        index = RepositoryIndex(repo="example/owner", instance_id="default-order", repo_root=root)
+        review = {
+            "status": "ok",
+            "candidates": [
+                {
+                    "path": "src/owner.js",
+                    "role": "patch_target",
+                    "confidence": 0.95,
+                    "grounded": True,
+                    "mechanism_verified": True,
+                    "entities": [{"kind": "function", "name": "exactOwner"}],
+                }
+            ],
+        }
+        _modules, functions = _rank_entities(
+            index=index,
+            ranked_files=[RankedLocation(path="src/owner.js", score=100.0)],
+            entity_hits=[],
+            flow_traces=[],
+            top_k=5,
+            candidate_review=review,
+            entity_queries=["loading preserve empty lines behavior"],
+            model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "default"}),
+        )
+
+        assert functions[0].name == "semanticHelper"
+
+
+def test_kimi_partial_fallback_drops_ungrounded_preserved_seed() -> None:
+    evidence = {
+        "src/related.py": {
+            "path_role": "source",
+            "rank": 1,
+            "rank_ratio": 1.0,
+            "review_role": "patch_target",
+            "review_confidence": 0.95,
+            "grounded": False,
+            "read_verified": False,
+        }
+    }
+    rows, diagnostics = _partial_closure_fallback(
+        ranked_pool=["src/related.py"],
+        evidence=evidence,
+        obligations=[],
+        issue_sketch=_Sketch(),
+        limit=3,
+        seed_paths=["src/related.py"],
+        model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "kimi"}),
+    )
+
+    assert rows == []
+    assert diagnostics["rejected_seed_paths"] == ["src/related.py"]
+    assert diagnostics["strict_owner_evidence"] is True
+
+
+def test_default_partial_fallback_preserves_existing_seed() -> None:
+    evidence = {
+        "src/related.py": {
+            "path_role": "source",
+            "rank": 1,
+            "rank_ratio": 1.0,
+            "review_role": "patch_target",
+            "review_confidence": 0.95,
+            "grounded": False,
+            "read_verified": False,
+        }
+    }
+    rows, diagnostics = _partial_closure_fallback(
+        ranked_pool=["src/related.py"],
+        evidence=evidence,
+        obligations=[],
+        issue_sketch=_Sketch(),
+        limit=3,
+        seed_paths=["src/related.py"],
+        model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "default"}),
+    )
+
+    assert [item["path"] for item in rows] == ["src/related.py"]
+    assert diagnostics["strict_owner_evidence"] is False
 
 
 def test_structure_index_finds_javascript_prototype_assignment() -> None:

@@ -34,7 +34,7 @@ from mycode.evidence.issue_sketch import build_issue_sketch, semantic_issue_text
 from mycode.repo_index.typed_graph import TypedRepositoryGraph
 from mycode.repo_index.structure_index import CodeEntity, RepositoryIndex, SearchHit, tokenize
 from mycode.schemas.evidence import NormalizedSample
-from mycode.utils.model_profile import active_model_profile, profile_int
+from mycode.utils.model_profile import ModelProtocolProfile, active_model_profile, profile_int
 from mycode.utils.phase_logger import phase_context, phase_event
 
 
@@ -5414,7 +5414,9 @@ def _rank_entities(
     top_k: int,
     candidate_review: dict[str, Any] | None = None,
     entity_queries: Iterable[str] = (),
+    model_profile: ModelProtocolProfile | None = None,
 ) -> tuple[list[RankedEntity], list[RankedEntity]]:
+    profile = model_profile or active_model_profile()
     functions: dict[str, RankedEntity] = {}
     modules: dict[str, RankedEntity] = {}
     file_score = {item.path: item.score for item in ranked_files}
@@ -5529,6 +5531,15 @@ def _rank_entities(
                     if _norm_path(entity.path) != path or entity.name != name:
                         continue
                     bonus = file_weight * confidence
+                    if (
+                        float(profile.verified_entity_owner_boost) > 0.0
+                        and bool(reviewed.get("grounded"))
+                        and bool(reviewed.get("mechanism_verified"))
+                    ):
+                        owner_weight = float(profile.verified_entity_owner_boost)
+                        if role == "supporting_target":
+                            owner_weight *= 0.5
+                        bonus = max(bonus, owner_weight * confidence)
                     entity.score += bonus
                     reason = f"llm_review_exact_entity:{role}:confidence={confidence:.2f}"
                     if reason not in entity.reasons:
@@ -6047,9 +6058,11 @@ def _partial_closure_fallback(
     issue_sketch: Any,
     limit: int,
     seed_paths: Iterable[str] = (),
+    model_profile: ModelProtocolProfile | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Select a small, evidence-backed partial set when verification stalls."""
 
+    profile = model_profile or active_model_profile()
     bounds = _closure_cardinality_bounds(
         obligations=obligations,
         evidence=evidence,
@@ -6077,7 +6090,13 @@ def _partial_closure_fallback(
         )
         grounded_direct_flow = bool(grounded_target and direct_flow)
         provisional = _closure_is_provisional_patch_candidate(item, obligations)
-        if not (mechanism or corroborated_grounded_target or grounded_direct_flow or provisional):
+        strict_owner_evidence = bool(profile.strict_partial_owner_evidence)
+        if not (
+            mechanism
+            or corroborated_grounded_target
+            or grounded_direct_flow
+            or (provisional and not strict_owner_evidence)
+        ):
             continue
         if review_role in {"navigation_only", "reproduction_only", "test_or_docs", "unlikely"} and not mechanism:
             continue
@@ -6120,10 +6139,28 @@ def _partial_closure_fallback(
     scored.sort(key=lambda row: (-row[0], row[1], row[2]))
     selected: list[dict[str, Any]] = []
     covered_responsibilities: set[str] = set()
+    rejected_seed_paths: list[str] = []
     for path in _dedupe([_norm_path(path) for path in seed_paths], limit=limit):
         item = evidence.get(path)
         if not item or item.get("path_role") in _CLOSURE_BLOCKED_ROLES:
             continue
+        if profile.strict_partial_owner_evidence:
+            mechanism = _closure_has_verified_mechanism(item, obligations)
+            grounded = bool(item.get("grounded"))
+            grounded_target = bool(
+                grounded
+                and str(item.get("review_role") or "") in {"patch_target", "supporting_target"}
+                and float(item.get("review_confidence") or 0.0) >= 0.58
+            )
+            corroborated_target = bool(
+                grounded_target and (item.get("quote_supported") or item.get("entity_supported"))
+            )
+            direct_flow_target = bool(
+                grounded_target and _closure_has_task_relevant_direct_flow(item, obligations)
+            )
+            if not (mechanism or corroborated_target or direct_flow_target):
+                rejected_seed_paths.append(path)
+                continue
         signature = _closure_responsibility_signature(item, obligations)
         selected.append(
             {
@@ -6165,6 +6202,8 @@ def _partial_closure_fallback(
         "selected_count": len(selected),
         "selected_paths": [item["path"] for item in selected],
         "covered_responsibilities": sorted(covered_responsibilities),
+        "strict_owner_evidence": bool(profile.strict_partial_owner_evidence),
+        "rejected_seed_paths": rejected_seed_paths,
     }
 
 
@@ -6560,10 +6599,14 @@ def _build_modification_closure(
             issue_sketch=issue_sketch,
             limit=limit,
             seed_paths=selected,
+            model_profile=profile,
         )
         fallback_paths = [item["path"] for item in fallback_rows]
         previous_paths = list(selected)
-        fallback_changed = bool(fallback_rows and fallback_paths != previous_paths)
+        fallback_changed = bool(
+            fallback_paths != previous_paths
+            and (fallback_rows or profile.strict_partial_owner_evidence)
+        )
         partial_fallback = {
             **fallback_diagnostics,
             "applied": fallback_changed,

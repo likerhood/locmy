@@ -302,6 +302,13 @@ def _prompt(
             "counterevidence must state one concrete reason it cannot independently explain the failure. "
             "Do not add candidates or broaden the task. Prefer a verified single owner over several plausible files.\n"
         )
+    if profile.require_owner_contrast:
+        profile_rules += (
+            "When one primary edit owner exists, mark exactly that file verified. A caller, consumer, navigation "
+            "file, or merely related implementation must be plausible, navigation, or reject. Complementary files "
+            "may be plausible supporting targets, but must not compete as primary heads. The verified owner's causal "
+            "chain must say why its code contains the faulty operation or the missing-check insertion point.\n"
+        )
     return (
         "You are the final edit-responsibility judge for repository issue localization.\n"
         f"Active decision protocol: {profile.name}.\n"
@@ -460,7 +467,7 @@ def _validate(
                 "counterevidence": counterevidence,
                 "counterevidence_missing": bool(
                     profile.require_counterevidence
-                    and verdict != "verified"
+                    and not mechanism_verified
                     and not counterevidence
                 ),
                 "matched_issue_axes": (
@@ -502,6 +509,13 @@ def _validate(
     counterevidence_complete = not any(
         item.get("counterevidence_missing") for item in candidates
     )
+    verified_primary_heads = [
+        item
+        for item in candidates
+        if item.get("role") == "patch_target" and item.get("mechanism_verified")
+    ]
+    ambiguous_verified_competitors = max(0, len(verified_primary_heads) - 1)
+    owner_contrast_complete = len(verified_primary_heads) == 1
     best_patch = next(
         (item for item in candidates if item["role"] in {"patch_target", "supporting_target"}),
         None,
@@ -518,11 +532,14 @@ def _validate(
         and not critical_missing
         and (not profile.require_counterevidence or review_coverage == 1.0)
         and counterevidence_complete
+        and (not profile.require_owner_contrast or owner_contrast_complete)
     )
     continue_search = bool(data.get("continue_search", False))
     if not any(item.get("mechanism_verified") for item in candidates) or (compact_schema and selected is None):
         continue_search = True
     if profile.require_counterevidence and (review_coverage < 1.0 or not counterevidence_complete):
+        continue_search = True
+    if profile.require_owner_contrast and not owner_contrast_complete:
         continue_search = True
     return {
         "status": "ok",
@@ -537,6 +554,9 @@ def _validate(
         "model_profile": profile.name,
         "review_coverage": round(review_coverage, 4),
         "counterevidence_complete": counterevidence_complete,
+        "verified_primary_heads": [item["path"] for item in verified_primary_heads],
+        "ambiguous_verified_competitors": ambiguous_verified_competitors,
+        "owner_contrast_complete": owner_contrast_complete,
     }
 
 

@@ -17,6 +17,9 @@ class ModelProtocolProfile:
     issue_text_limit: int = 3500
     require_counterevidence: bool = False
     require_verified_mechanism_for_complete: bool = False
+    require_owner_contrast: bool = False
+    strict_partial_owner_evidence: bool = False
+    verified_entity_owner_boost: float = 0.0
 
 
 _PROFILES = {
@@ -34,6 +37,9 @@ _PROFILES = {
         issue_text_limit=2400,
         require_counterevidence=True,
         require_verified_mechanism_for_complete=True,
+        require_owner_contrast=True,
+        strict_partial_owner_evidence=True,
+        verified_entity_owner_boost=240.0,
     ),
 }
 

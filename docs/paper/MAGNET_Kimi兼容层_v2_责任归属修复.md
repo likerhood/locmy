@@ -120,7 +120,42 @@ File Recall@15 仍为 0，且由于本地深层 flow 被执行两次，总耗时
 真正 gold `build.py`、`messages.py` 仍未进入候选前 15，根因已经转为上游召回不足，不能
 再靠 owner rerank 修复。
 
-## 6. 下一步在线验证
+## 6. 最终提交在线复跑
+
+在最终提交 `c622cca` 上，继续使用同一份
+`/data2/like/locmy/.env.kimi.local`、同一 Kimi2.6 套餐和同一 Tailwind 样本进行一次
+独立复跑。结果写入：
+
+```text
+result/kimi_compat_v2_final_tailwind_20261112
+```
+
+本次请求全部成功，没有出现 401、429、超时或额度拒绝。耗时 106.9 秒，消耗
+23,933 token。File Acc@1 保持 1.0，但 File Recall@15 从此前 v2 的 1.0 降至
+0.5；Function Recall@15 从 0.75 降至 0.25，Function MRR 从 0.1667 降至
+0.0667。修改闭包仍为空，没有把未经验证的相关文件交给下游修复。
+
+阶段快照给出了关键因果证据：第二个 gold 文件 `src/corePlugins.js` 在 fast seed 中仍为
+第 3，但在第一轮动态搜索后已经掉出 Top15；之后的 cross-round frontier、head selector
+和 modification closure 都没有再看到该文件。最终提交新增的 class/module owner guard
+只参与 reviewer 证据校验，并没有在本次 Tailwind 轨迹中直接删除该 gold。因此这次召回下降
+不能归因于最后一道 owner guard，而是 Kimi 规划和动态检索存在独立运行间波动，且当前
+seed retention 没有稳定保护高价值初始候选。
+
+三次 Tailwind 配对结果如下：
+
+| 版本 | File Recall@15 | File MAP@15 | Function Recall@15 | Function MRR | 时间 | Token |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| v1 | 1.00 | 0.8333 | 0.25 | 0.0714 | 157.0s | 23,548 |
+| v2（最终 guard 前） | 1.00 | 0.6250 | 0.75 | 0.1667 | 144.4s | 24,005 |
+| v2（最终提交） | 0.50 | 0.5000 | 0.25 | 0.0667 | 106.9s | 23,933 |
+
+所以当前能支持的结论是：v2 的证据对齐和严格 fallback 确实阻止了已观察到的虚假 owner
+闭环，并在一次 Tailwind 运行中显著改善了函数排序；但单次正向结果不能证明稳定的总体定位
+提升。最终复跑显示上游召回波动足以抵消后置精度收益。现在不应启动 Omni296 全量重跑，
+也不应宣称 Kimi 已被完全适配。
+
+## 7. 下一步在线验证
 
 先用 v1 已跑过的 Tailwind 和 mypy 困难样本做配对复测，再运行 8--12 条独立金丝雀。
 重点比较：
@@ -133,3 +168,13 @@ File Recall@15 仍为 0，且由于本地深层 flow 被执行两次，总耗时
 
 只有在函数 Top1/5 或 closure precision 改善且文件召回不下降时，才值得启动完整
 Omni296-Kimi 重跑。v2 输出必须使用新目录，不能覆盖旧实验。
+
+下一版应优先修复两个与 owner guard 正交的问题：
+
+1. 对 fast seed 中有多通道支持的候选设置最小保留配额，避免正确架构文件在第一轮直接掉出
+   Top15；保留必须依赖确定性证据，不能无条件锁定所有初始候选。
+2. 对缺失全局符号、初始化和注册链问题增加 architecture query expansion，使 mypy 的
+   `build.py`、`messages.py` 能进入候选池。后置 owner rerank 无法恢复从未进入 Top15 的文件。
+
+随后至少运行 8--12 条独立金丝雀，并对同一样本重复 2--3 次，分别报告均值、标准差和最差
+结果。只有这样才能把代码改进与 Kimi 的采样波动区分开。

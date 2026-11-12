@@ -18,6 +18,7 @@ class ModelProtocolProfile:
     require_counterevidence: bool = False
     require_verified_mechanism_for_complete: bool = False
     require_owner_contrast: bool = False
+    require_entity_snippet_alignment: bool = False
     strict_partial_owner_evidence: bool = False
     verified_entity_owner_boost: float = 0.0
 
@@ -38,6 +39,7 @@ _PROFILES = {
         require_counterevidence=True,
         require_verified_mechanism_for_complete=True,
         require_owner_contrast=True,
+        require_entity_snippet_alignment=True,
         strict_partial_owner_evidence=True,
         verified_entity_owner_boost=240.0,
     ),

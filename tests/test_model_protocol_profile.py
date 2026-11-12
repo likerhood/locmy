@@ -21,6 +21,7 @@ def test_kimi_profile_is_inferred_from_api_model() -> None:
     assert profile.require_counterevidence is True
     assert profile.require_verified_mechanism_for_complete is True
     assert profile.require_owner_contrast is True
+    assert profile.require_entity_snippet_alignment is True
     assert profile.strict_partial_owner_evidence is True
     assert profile.verified_entity_owner_boost == 240.0
 

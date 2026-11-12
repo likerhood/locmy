@@ -138,6 +138,65 @@ def test_kimi_owner_contrast_accepts_one_owner_and_navigation_candidate() -> Non
     assert review["stop_ready"] is True
 
 
+def test_kimi_rejects_verified_owner_with_misaligned_snippet_and_entity() -> None:
+    review = review_candidates(
+        llm=lambda _prompt: json.dumps(
+            {
+                "selected_head": "src/owner.py",
+                "reviews": [
+                    {
+                        "path": "src/owner.py",
+                        "verdict": "verified",
+                        "confidence": 0.95,
+                        "snippet_id": "C1S1",
+                        "entity_id": "C1E1",
+                        "flow_id": "F1",
+                        "causal_chain": "lookup_owner raises the observed error",
+                        "counterevidence": "",
+                        "rejection_code": "none",
+                    }
+                ],
+                "continue_search": False,
+                "missing_evidence": [],
+                "next_queries": [],
+            }
+        ),
+        issue_text="lookup_owner raises the observed error",
+        issue_sketch=_Sketch(),
+        ranked=[RankedLocation(path="src/owner.py", score=100.0)],
+        code_contexts=[
+            {
+                "path": "src/owner.py",
+                "entities": [
+                    {
+                        "kind": "function",
+                        "name": "lookup_owner",
+                        "start_line": 50,
+                        "end_line": 60,
+                    }
+                ],
+                "snippets": [
+                    {
+                        "start_line": 1,
+                        "end_line": 3,
+                        "text": "def unrelated(value): return value",
+                    }
+                ],
+            }
+        ],
+        flow_traces=[{"candidate_target_paths": ["src/owner.py"], "flow_type": "dataflow"}],
+        round_no=1,
+        model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "kimi"}),
+    )
+
+    candidate = review["candidates"][0]
+    assert candidate["entity_snippet_aligned"] is False
+    assert candidate["entity_supported"] is False
+    assert candidate["mechanism_verified"] is False
+    assert review["continue_search"] is True
+    assert review["stop_ready"] is False
+
+
 def test_candidate_review_recovers_complete_candidate_from_truncated_json() -> None:
     ranked = [
         RankedLocation(path="src/io/files.js", score=90.0, reasons=["entity:loadStrings"]),
@@ -296,7 +355,7 @@ def test_kimi_review_requires_counterevidence_for_non_selected_candidates(monkey
             {
                 "path": "src/parser.js",
                 "entities": [{"kind": "function", "name": "tokenize"}],
-                "snippets": [{"text": "return input.filter(Boolean);"}],
+                    "snippets": [{"text": "function tokenize(input) { return input.filter(Boolean); }"}],
             },
             {
                 "path": "src/wrapper.js",

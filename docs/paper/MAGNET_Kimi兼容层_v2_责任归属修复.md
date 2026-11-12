@@ -41,6 +41,11 @@ navigation 或 reject。互补的多文件改动可以保留为 supporting targe
 Kimi 只有在 owner 对比完成后才能 `stop_ready=true`。零个或多个 verified primary
 head 都会继续搜索或复核。
 
+在线 mypy 金丝雀进一步发现，旧校验允许 snippet 和 entity 只要来自同一文件就组合成
+verified mechanism，即使二者相隔数千行。Kimi profile 因此增加
+`require_entity_snippet_alignment`：snippet 必须包含实体名，或与实体源码行范围重叠。
+不同代码区域的证据不能再拼接成 verified owner。
+
 ### 3.2 严格 partial fallback
 
 Kimi profile 开启 `strict_partial_owner_evidence`。旧 seed 不再因为“之前被选中过”而自动
@@ -68,7 +73,7 @@ MiMo 的该参数为 0，因此原排序保持不变。
 聚焦测试结果：
 
 ```text
-63 passed
+64 passed
 ```
 
 覆盖：
@@ -76,16 +81,33 @@ MiMo 的该参数为 0，因此原排序保持不变。
 - Kimi profile 三项开关与数值；
 - 两个竞争 verified head 会阻止停止；
 - 一个 verified owner 加导航候选可以完成对比；
+- 同文件但不同代码区域的 snippet/entity 不能形成 verified mechanism；
 - Kimi 丢弃无 grounded owner 证据的旧 seed；
 - default 仍保留原 fallback 行为；
 - Kimi 的 verified 精确函数超过语义 sibling；
 - default 的函数顺序不变；
 - 文档过滤、闭包 guard 和既有候选复核回归。
 
-Python 编译和 `git diff --check` 同时通过。此阶段未调用 Kimi API，也未覆盖任何历史
+Python 编译和 `git diff --check` 同时通过。离线测试未调用 Kimi API，也未覆盖任何历史
 Omni296 或 RQ4 结果。
 
-## 5. 下一步在线验证
+## 5. 两条在线金丝雀
+
+使用 `/data2/like/locmy/.env.kimi.local` 中的 `ws-4tl5i0ym93z201nz` Kimi2.6
+套餐运行，不覆盖 v1 结果。
+
+Tailwind 首次 v2：File Acc@1 和 Recall@15 均保持 1.0；Function Recall@15 从
+0.25 提升到 0.75，MRR 从 0.0714 提升到 0.1667；耗时从 157.0 秒降到
+144.4 秒。严格 fallback 删除了没有机制证据的 `offsets.js`，但同时得到空 closure，
+说明精度保护生效而 owner 证据仍不足。
+
+mypy 首次 v2：耗时从 485.2 秒降到 282.2 秒，token 从 35,318 降到 26,516，
+但 File Recall@15 从 0.5 降为 0。轨迹显示 Kimi 把 `checker.py` 第 909 行附近的
+snippet 与约第 6233 行的 `lookup_typeinfo` entity 拼接为 verified mechanism，随后唯一
+owner 和 closure promotion 放大了该误判。这个负结果直接促成上述 snippet/entity 对齐
+校验；修复后必须复跑 mypy 才能判断回归是否解除。
+
+## 6. 下一步在线验证
 
 先用 v1 已跑过的 Tailwind 和 mypy 困难样本做配对复测，再运行 8--12 条独立金丝雀。
 重点比较：

@@ -309,6 +309,12 @@ def _prompt(
             "may be plausible supporting targets, but must not compete as primary heads. The verified owner's causal "
             "chain must say why its code contains the faulty operation or the missing-check insertion point.\n"
         )
+    if profile.require_entity_snippet_alignment:
+        profile_rules += (
+            "The selected snippet and entity must refer to the same code region: choose a snippet that contains the "
+            "entity or overlaps its source lines. Do not combine an unrelated snippet and entity merely because they "
+            "come from the same file.\n"
+        )
     return (
         "You are the final edit-responsibility judge for repository issue localization.\n"
         f"Active decision protocol: {profile.name}.\n"
@@ -384,6 +390,25 @@ def _validate(
         flow_id = str(item.get("flow_id") or "").strip()
         selected_snippet = snippets_by_path.get(path, {}).get(snippet_id) if compact_schema else None
         selected_entity = entities_by_path.get(path, {}).get(entity_id) if compact_schema else None
+        snippet_text = str((selected_snippet or {}).get("text") or "")
+        entity_name = str((selected_entity or {}).get("name") or "")
+        snippet_start = (selected_snippet or {}).get("start_line")
+        snippet_end = (selected_snippet or {}).get("end_line")
+        entity_start = (selected_entity or {}).get("start_line")
+        entity_end = (selected_entity or {}).get("end_line")
+        ranges_overlap = bool(
+            all(isinstance(value, int) for value in (snippet_start, snippet_end, entity_start, entity_end))
+            and int(snippet_start) <= int(entity_end)
+            and int(entity_start) <= int(snippet_end)
+        )
+        entity_snippet_aligned = bool(
+            selected_snippet
+            and selected_entity
+            and (
+                ranges_overlap
+                or (entity_name and entity_name.lower() in snippet_text.lower())
+            )
+        )
         entities = []
         if selected_entity:
             entities.append(
@@ -417,7 +442,14 @@ def _validate(
         supported_entities = [
             entity
             for entity in entities
-            if (compact_schema and selected_entity is not None)
+            if (
+                compact_schema
+                and selected_entity is not None
+                and (
+                    not profile.require_entity_snippet_alignment
+                    or entity_snippet_aligned
+                )
+            )
             or str(entity.get("name") or "").lower() in entity_support_text
         ]
         unsupported_entities = [entity for entity in entities if entity not in supported_entities]
@@ -459,6 +491,7 @@ def _validate(
                 "grounded": path in grounded_paths,
                 "quote_supported": quote_supported,
                 "entity_supported": entity_supported,
+                "entity_snippet_aligned": entity_snippet_aligned if compact_schema else None,
                 "supported_entities": supported_entities[:8],
                 "unsupported_entities": unsupported_entities[:8],
                 "direct_flow_supported": direct_flow_supported,

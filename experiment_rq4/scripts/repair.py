@@ -3,11 +3,13 @@
 
 Each sample/method gets one function/line localization call, followed by one
 greedy and K-1 stochastic repair calls. Every paid call has an independent
-durable attempt record. Only explicit transient HTTP responses receive bounded
-retries; uncertain transport failures are never retried automatically.
+durable attempt record. Explicit transient HTTP responses and proven
+pre-connect DNS failures receive bounded retries; uncertain transport failures
+are never retried automatically.
 """
 import argparse
 import ast
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import difflib
 import hashlib
 import http.client
@@ -15,6 +17,8 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+import socket
 import subprocess
 import time
 import urllib.error
@@ -43,6 +47,31 @@ class CandidateOutputError(ValueError):
         super().__init__(message)
         self.failure_class = failure_class
         self.failure_stage = failure_stage
+
+
+def is_preconnect_dns_failure(exc):
+    """Return true only when no connection could have reached the provider."""
+    return isinstance(exc, urllib.error.URLError) and isinstance(exc.reason, socket.gaierror)
+
+
+def archive_recoverable_paid_call(call_dir):
+    """Archive a proven pre-connect failure so an explicit resume may retry it."""
+    failure_path = call_dir/'failure.json'
+    if not failure_path.exists() or any((call_dir/name).exists()
+                                        for name in ('stream.jsonl', 'response.json', 'result.json')):
+        return None
+    try:
+        failure = json.loads(failure_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    if (failure.get('error_type') != 'URLError'
+            or failure.get('error_reason_type') != 'gaierror'):
+        return None
+    history = (call_dir.parent/'retry_history'/call_dir.name/
+               f'{time.strftime("%Y%m%d-%H%M%S")}-{time.time_ns()}')
+    history.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(call_dir), str(history))
+    return history
 
 LOCALIZATION_SYSTEM_PROMPT = """You are the fine-grained localization stage of a software repair system.
 Identify the smallest defensible function and line intervals that must be inspected or edited to solve the issue.
@@ -534,9 +563,11 @@ def api_call(call_dir, messages, temperature, max_tokens, top_p=1.0,
     if result_path.exists() and response_path.exists():
         return json.loads(result_path.read_text()), json.loads(response_path.read_text())
     if call_dir.exists():
-        raise PaidCallUnavailable(
-            f'Uncertain or failed paid request at {call_dir}; the original request is not resent'
-        )
+        history = archive_recoverable_paid_call(call_dir)
+        if history is None:
+            raise PaidCallUnavailable(
+                f'Uncertain or failed paid request at {call_dir}; the original request is not resent'
+            )
     if token_field not in {'max_tokens', 'max_completion_tokens'}:
         raise ValueError('Unsupported completion token field')
     if thinking_mode not in {None, 'enabled', 'disabled'}:
@@ -565,7 +596,7 @@ def api_call(call_dir, messages, temperature, max_tokens, top_p=1.0,
         'max_tokens': max_tokens, 'token_field': token_field,
         'thinking_mode': thinking_mode, 'streaming': streaming,
         'started_at': time.time(),
-        'http_retry_limit': http_retries, 'http_failures': []}
+        'http_retry_limit': http_retries, 'http_failures': [], 'transport_failures': []}
     save(call_dir/'attempt.json', attempt)
     start = time.monotonic()
     retryable_statuses = {429, 500, 502, 503, 504}
@@ -601,6 +632,26 @@ def api_call(call_dir, messages, temperature, max_tokens, top_p=1.0,
             save(call_dir/'failure.json', {'status': 'failed', 'error_type': type(exc).__name__,
                 'http_status': exc.code, 'http_reason': str(exc.reason),
                 'http_attempt_count': request_index + 1, 'elapsed_seconds': time.monotonic()-start})
+            raise
+        except urllib.error.URLError as exc:
+            event = {'attempt_number': request_index + 1,
+                     'error_type': type(exc).__name__,
+                     'error_reason_type': type(exc.reason).__name__,
+                     'elapsed_seconds': time.monotonic()-start}
+            attempt['transport_failures'].append(event)
+            save(call_dir/'attempt.json', attempt)
+            if is_preconnect_dns_failure(exc) and request_index < http_retries:
+                delay = retry_sleeps[min(request_index, len(retry_sleeps)-1)] if retry_sleeps else 0
+                event['retry_after_seconds'] = delay
+                save(call_dir/'attempt.json', attempt)
+                if delay:
+                    time.sleep(delay)
+                continue
+            save(call_dir/'failure.json', {'status': 'failed',
+                'error_type': type(exc).__name__,
+                'http_attempt_count': request_index + 1,
+                'elapsed_seconds': time.monotonic()-start,
+                'error_reason_type': type(exc.reason).__name__})
             raise
         except Exception as exc:
             failure = {'status': 'failed', 'error_type': type(exc).__name__,
@@ -684,6 +735,148 @@ def choose_candidate(candidates):
                                        x['candidate_index']))
 
 
+def run_candidate_tasks(count, workers, callback, on_complete=None):
+    """Run independent candidate jobs with a bounded, deterministic result order."""
+    if not 1 <= workers <= 2:
+        raise ValueError('candidate workers must be 1 or 2')
+    if workers == 1:
+        results = []
+        for index in range(count):
+            candidate = callback(index)
+            results.append(candidate)
+            if on_complete:
+                on_complete(candidate)
+        return results
+    results = []
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix='rq4-candidate') as pool:
+        futures = {pool.submit(callback, index): index for index in range(count)}
+        for future in as_completed(futures):
+            candidate = future.result()
+            results.append(candidate)
+            if on_complete:
+                on_complete(candidate)
+    return sorted(results, key=lambda item: item['candidate_index'])
+
+
+def generate_candidate(index, protocol, run_dir, repair_messages, token_field,
+                       thinking_mode, streaming, editable, contexts, repair_plan,
+                       method):
+    """Generate, parse, validate, and durably save one independent candidate."""
+    temperature = protocol['greedy_temperature'] if index == 0 else protocol['sampling_temperature']
+    top_p = protocol['greedy_top_p'] if index == 0 else protocol['sampling_top_p']
+    max_tokens = protocol['greedy_max_output_tokens'] if index == 0 else protocol['sampling_max_output_tokens']
+    call_dir = run_dir/'paid_calls'/f'repair_{index:02d}'
+    try:
+        call_result, response = api_call(
+            call_dir, repair_messages, temperature, max_tokens, top_p,
+            token_field, thinking_mode, streaming,
+        )
+    except (PaidCallUnavailable, IncompleteStreamingResponse,
+            urllib.error.URLError, http.client.IncompleteRead,
+            TimeoutError, ConnectionError,
+            json.JSONDecodeError) as exc:
+        candidate = failed_request_candidate(index, temperature, top_p, exc, call_dir)
+        save(run_dir/'candidates'/f'{index:02d}.json', candidate)
+        print(f'[repair-candidate] method={method} '
+              f'candidate={index+1}/{protocol["candidates_per_instance"]} '
+              f'temperature={temperature} top_p={top_p} '
+              f'status=failed failure_stage=api_request '
+              f'error_type={type(exc).__name__} patch_bytes=0', flush=True)
+        return candidate
+    response_file = call_dir/'response.json'
+    candidate = {'candidate_index': index, 'temperature': temperature, 'top_p': top_p,
+        'status': 'failed', 'failure_stage': 'response_parse',
+        'model_patch': '', 'usage': call_result['usage'],
+        'response_received': True, 'response_file': str(response_file.relative_to(run_dir)),
+        'response_parse_ok': False, 'patch_nonempty': False,
+        'patch_apply_ok': False, 'scope_ok': None,
+        'format_repair_attempted': False,
+        'provider_request_id': call_result.get('provider_request_id'),
+        'finish_reason': ((response.get('choices') or [{}])[0].get('finish_reason')),
+        'response_content_chars': len(str(
+            ((response.get('choices') or [{}])[0].get('message') or {}).get('content') or ''))}
+    try:
+        content = ((response.get('choices') or [{}])[0].get('message') or {}).get('content') or ''
+
+        def request_format_repair(source_content, parse_exc):
+            if int(protocol.get('format_repair_attempts', 0)) < 1:
+                raise parse_exc
+            format_call_dir = run_dir/'paid_calls'/f'repair_{index:02d}_format_01'
+            try:
+                format_result, format_response = api_call(
+                    format_call_dir,
+                    format_repair_messages(source_content, parse_exc),
+                    0.0, protocol['format_repair_max_output_tokens'], 1.0,
+                    token_field, thinking_mode, streaming,
+                )
+            except (PaidCallUnavailable, IncompleteStreamingResponse,
+                    urllib.error.URLError, http.client.IncompleteRead,
+                    TimeoutError, ConnectionError, json.JSONDecodeError) as retry_exc:
+                candidate.update({'failure_stage': 'format_repair_api',
+                    'failure_class': 'FORMAT_REPAIR_API_FAILURE',
+                    'format_repair_attempted': True,
+                    'format_repair_error': type(retry_exc).__name__})
+                raise CandidateOutputError('Bounded format repair request failed',
+                    'FORMAT_REPAIR_API_FAILURE', 'format_repair_api') from retry_exc
+            retry_message = ((format_response.get('choices') or [{}])[0].get('message') or {})
+            retry_content = retry_message.get('content') or ''
+            candidate.update({'format_repair_attempted': True,
+                'format_repair_response_file': str((format_call_dir/'response.json').relative_to(run_dir)),
+                'format_repair_usage': format_result.get('usage') or {},
+                'format_repair_finish_reason': (format_response.get('choices') or [{}])[0].get('finish_reason')})
+            for usage_key, usage_value in (format_result.get('usage') or {}).items():
+                if isinstance(usage_value, (int, float)):
+                    candidate['usage'][usage_key] = candidate['usage'].get(usage_key, 0) + usage_value
+            if candidate['format_repair_finish_reason'] in {'length', 'content_filter'}:
+                raise CandidateOutputError('Format repair completion was incomplete or filtered',
+                    'FORMAT_REPAIR_INCOMPLETE', 'format_repair_incomplete')
+            return retry_content
+
+        edits, response_format, parsed_from = parse_edits_with_format_retry(
+            content, candidate['finish_reason'], request_format_repair)
+        candidate['format_repair_attempted'] = parsed_from == 'format_repair_response'
+        candidate['parsed_from'] = parsed_from
+        candidate['response_parse_ok'] = True
+        candidate['response_format'] = response_format
+        candidate['failure_stage'] = 'edit_application'
+        updated = apply_edits(editable, edits, visible=contexts)
+        candidate['patch_apply_ok'] = True
+        candidate['scope_ok'] = True
+        candidate['failure_stage'] = 'static_validation'
+        candidate['validation'] = validate_updated_files(editable, updated)
+        candidate['model_patch'] = make_patch(editable, updated)
+        candidate['patch_nonempty'] = bool(candidate['model_patch'])
+        candidate['status'] = 'generated' if candidate['model_patch'] else 'empty_patch'
+        candidate['failure_class'] = None if candidate['model_patch'] else 'NO_VALID_PATCH'
+        candidate['coverage_diagnostic'] = assess_patch_coverage(
+            repair_plan, candidate['validation']['changed_files'])
+        if candidate['model_patch']:
+            candidate['normalized_patch_sha256'] = normalized_patch_key(editable, updated)
+            candidate['changed_lines'] = changed_line_count(candidate['model_patch'])
+        candidate.pop('failure_stage', None)
+    except Exception as exc:
+        candidate['error_type'] = type(exc).__name__
+        candidate['error_detail'] = str(exc)[:500]
+        if isinstance(exc, CandidateOutputError):
+            candidate['failure_stage'] = exc.failure_stage
+            candidate['failure_class'] = exc.failure_class
+        elif not candidate.get('failure_class'):
+            if candidate.get('failure_stage') == 'response_parse':
+                candidate['failure_class'] = 'RESPONSE_PARSE_FAILED'
+            elif candidate.get('failure_stage') == 'edit_application':
+                candidate['failure_class'] = 'PATCH_NOT_APPLIED'
+                candidate['scope_ok'] = False
+            elif candidate.get('failure_stage') == 'static_validation':
+                candidate['failure_class'] = 'STATIC_VALIDATION_FAILED'
+        if isinstance(exc, json.JSONDecodeError):
+            candidate['error_location'] = {'line': exc.lineno, 'column': exc.colno}
+    save(run_dir/'candidates'/f'{index:02d}.json', candidate)
+    print(f'[repair-candidate] method={method} candidate={index+1}/{protocol["candidates_per_instance"]} '
+          f'temperature={temperature} top_p={top_p} status={candidate["status"]} '
+          f'patch_bytes={len(candidate["model_patch"].encode())}', flush=True)
+    return candidate
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dataset', choices=['swe', 'omni'], required=True)
@@ -693,8 +886,14 @@ def main():
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--env-file', type=Path, default=ROOT/'.env.local')
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument('--sample-file', type=Path,
+                        help='Versioned input JSONL override; defaults to data/inputs/<dataset>50.jsonl.')
+    parser.add_argument('--localization-file', type=Path,
+                        help='Versioned localization JSONL override; defaults to normalized/<dataset>/<method>.jsonl.')
     parser.add_argument('--candidate-count', type=int,
                         help='Smoke-only override for paid repair candidates (1..10).')
+    parser.add_argument('--candidate-workers', type=int, choices=[1, 2], default=1,
+                        help='Maximum concurrent repair candidate calls; fine localization remains serial.')
     args = parser.parse_args()
     load_env(args.env_file)
     protocol = json.loads((ROOT/'configs/protocol.json').read_text())
@@ -706,10 +905,11 @@ def main():
     token_field = protocol.get('completion_token_field', 'max_tokens')
     thinking_mode = protocol.get('thinking_mode')
     streaming = bool(protocol.get('streaming', False))
-    sample = next(r for r in map(json.loads, (ROOT/'data/inputs'/f'{args.dataset}50.jsonl').open())
+    sample_path = args.sample_file or ROOT/'data/inputs'/f'{args.dataset}50.jsonl'
+    localization_path = args.localization_file or ROOT/'normalized'/args.dataset/f'{args.method}.jsonl'
+    sample = next(r for r in map(json.loads, sample_path.open())
                   if r['instance_id'] == args.instance_id)
-    loc_path = ROOT/'normalized'/args.dataset/f'{args.method}.jsonl'
-    loc = next(r for r in map(json.loads, loc_path.open()) if r['instance_id'] == args.instance_id)
+    loc = next(r for r in map(json.loads, localization_path.open()) if r['instance_id'] == args.instance_id)
     if loc['status'] != 'available' or not loc['found_files']:
         raise SystemExit('Missing or empty file localization prediction')
     repo = args.repo.resolve()
@@ -727,18 +927,51 @@ def main():
         {'role': 'system', 'content': LOCALIZATION_SYSTEM_PROMPT},
         {'role': 'user', 'content': json.dumps(localization_payload, ensure_ascii=False)}]
     save(run_dir/'request.json', {'protocol': protocol, 'base_commit': sample['base_commit'],
+        'candidate_workers': args.candidate_workers,
+        'sample_file': str(sample_path.resolve()),
+        'localization_file': str(localization_path.resolve()),
         'candidate_files': list(original), 'upstream_functions': loc.get('found_functions', []),
         'rejected_paths': rejected, 'localization_messages': localization_messages,
         'localization_prompt_sha256': hashlib.sha256(json.dumps(localization_messages, ensure_ascii=False).encode()).hexdigest()})
     if not args.execute:
-        print(f'OFFLINE dry-run passed; planned calls={1 + protocol["candidates_per_instance"]}; request={run_dir / "request.json"}')
+        print(f'OFFLINE dry-run passed; planned calls={1 + protocol["candidates_per_instance"]}; '
+              f'candidate_workers={args.candidate_workers}; request={run_dir / "request.json"}')
         return
     if not all(os.getenv(k) for k in ['RQ4_BASE_URL', 'RQ4_API_KEY', 'RQ4_MODEL']):
         raise SystemExit('Configure RQ4_BASE_URL/RQ4_API_KEY/RQ4_MODEL first')
 
-    fine_result, fine_response = api_call(run_dir/'paid_calls'/'fine_localization', localization_messages,
-        protocol['localization_temperature'], protocol['localization_max_output_tokens'],
-        protocol['localization_top_p'], token_field, thinking_mode, streaming)
+    fine_call_dir = run_dir/'paid_calls'/'fine_localization'
+    try:
+        fine_result, fine_response = api_call(
+            fine_call_dir, localization_messages,
+            protocol['localization_temperature'], protocol['localization_max_output_tokens'],
+            protocol['localization_top_p'], token_field, thinking_mode, streaming,
+        )
+    except (PaidCallUnavailable, IncompleteStreamingResponse,
+            urllib.error.URLError, http.client.IncompleteRead,
+            TimeoutError, ConnectionError, json.JSONDecodeError) as exc:
+        fine = {'instance_id': args.instance_id, 'method': args.method,
+            'status': 'infrastructure_failure', 'file_top_k': protocol['file_top_k'],
+            'candidate_files': list(original),
+            'upstream_functions': loc.get('found_functions', []),
+            'locations': [], 'repair_plan': None, 'response_format': None,
+            'usage': {}, 'provider_request_id': None, 'finish_reason': None,
+            'error_type': type(exc).__name__, 'error_detail': str(exc)[:500],
+            'retry_safety': 'no_automatic_resend_without_proven_preconnect_failure'}
+        save(run_dir/'fine_localization.json', fine)
+        result = {'instance_id': args.instance_id,
+            'model_name_or_path': f'rq4-{args.method}-{os.environ["RQ4_MODEL"]}',
+            'model_patch': '', 'status': 'infrastructure_failure',
+            'protocol': protocol['name'], 'selected_candidate': None,
+            'candidate_count': 0, 'valid_candidate_count': 0,
+            'candidate_outcomes': {'failed:fine_localization_api': 1},
+            'infrastructure_candidate_failures': 1,
+            'unique_nonempty_patches': 0, 'selection': None,
+            'fine_localization_status': fine['status'], 'usage': {}}
+        save(run_dir/'prediction.jsonl', result, jsonl=True)
+        print(f'infrastructure_failure: fine localization unavailable; '
+              f'error_type={type(exc).__name__}; {run_dir / "prediction.jsonl"}', flush=True)
+        return
     location_error = None
     try:
         locations, location_format, repair_plan = parse_localization(
@@ -779,121 +1012,26 @@ def main():
                 'repair_plan': repair_plan, 'localized_code': contexts}, ensure_ascii=False)}]
         editable = {path: original[path] for path in contexts}
         save(run_dir/'repair_request.json', {'messages': repair_messages, 'context_bytes': context_bytes,
+                                             'candidate_workers': args.candidate_workers,
                                              'locations': locations, 'repair_plan': repair_plan,
                                              'files': editable})
-        for index in range(protocol['candidates_per_instance']):
-            temperature = protocol['greedy_temperature'] if index == 0 else protocol['sampling_temperature']
-            top_p = protocol['greedy_top_p'] if index == 0 else protocol['sampling_top_p']
-            max_tokens = protocol['greedy_max_output_tokens'] if index == 0 else protocol['sampling_max_output_tokens']
-            call_dir = run_dir/'paid_calls'/f'repair_{index:02d}'
-            try:
-                call_result, response = api_call(
-                    call_dir, repair_messages, temperature, max_tokens, top_p,
-                    token_field, thinking_mode, streaming,
-                )
-            except (PaidCallUnavailable, IncompleteStreamingResponse,
-                    urllib.error.URLError, http.client.IncompleteRead,
-                    TimeoutError, ConnectionError,
-                    json.JSONDecodeError) as exc:
-                candidate = failed_request_candidate(index, temperature, top_p, exc, call_dir)
-                save(run_dir/'candidates'/f'{index:02d}.json', candidate)
-                candidates.append(candidate)
-                print(f'[repair-candidate] method={args.method} '
-                      f'candidate={index+1}/{protocol["candidates_per_instance"]} '
-                      f'temperature={temperature} top_p={top_p} '
-                      f'status=failed failure_stage=api_request '
-                      f'error_type={type(exc).__name__} patch_bytes=0', flush=True)
-                continue
-            response_file = call_dir/'response.json'
-            candidate = {'candidate_index': index, 'temperature': temperature, 'top_p': top_p,
-                'status': 'failed', 'failure_stage': 'response_parse',
-                'model_patch': '', 'usage': call_result['usage'],
-                'response_received': True, 'response_file': str(response_file.relative_to(run_dir)),
-                'response_parse_ok': False, 'patch_nonempty': False,
-                'patch_apply_ok': False, 'scope_ok': None,
-                'format_repair_attempted': False,
-                'provider_request_id': call_result.get('provider_request_id'),
-                'finish_reason': ((response.get('choices') or [{}])[0].get('finish_reason')),
-                'response_content_chars': len(str(
-                    ((response.get('choices') or [{}])[0].get('message') or {}).get('content') or ''))}
-            try:
-                content = ((response.get('choices') or [{}])[0].get('message') or {}).get('content') or ''
-                def request_format_repair(source_content, parse_exc):
-                    if int(protocol.get('format_repair_attempts', 0)) < 1:
-                        raise parse_exc
-                    format_call_dir = run_dir/'paid_calls'/f'repair_{index:02d}_format_01'
-                    try:
-                        format_result, format_response = api_call(
-                            format_call_dir,
-                            format_repair_messages(source_content, parse_exc),
-                            0.0, protocol['format_repair_max_output_tokens'], 1.0,
-                            token_field, thinking_mode, streaming,
-                        )
-                    except (PaidCallUnavailable, IncompleteStreamingResponse,
-                            urllib.error.URLError, http.client.IncompleteRead,
-                            TimeoutError, ConnectionError, json.JSONDecodeError) as retry_exc:
-                        candidate.update({'failure_stage': 'format_repair_api',
-                            'failure_class': 'FORMAT_REPAIR_API_FAILURE',
-                            'format_repair_attempted': True,
-                            'format_repair_error': type(retry_exc).__name__})
-                        raise CandidateOutputError('Bounded format repair request failed',
-                            'FORMAT_REPAIR_API_FAILURE', 'format_repair_api') from retry_exc
-                    retry_message = ((format_response.get('choices') or [{}])[0].get('message') or {})
-                    retry_content = retry_message.get('content') or ''
-                    candidate.update({'format_repair_attempted': True,
-                        'format_repair_response_file': str((format_call_dir/'response.json').relative_to(run_dir)),
-                        'format_repair_usage': format_result.get('usage') or {},
-                        'format_repair_finish_reason': (format_response.get('choices') or [{}])[0].get('finish_reason')})
-                    for usage_key, usage_value in (format_result.get('usage') or {}).items():
-                        if isinstance(usage_value, (int, float)):
-                            candidate['usage'][usage_key] = candidate['usage'].get(usage_key, 0) + usage_value
-                    if candidate['format_repair_finish_reason'] in {'length', 'content_filter'}:
-                        raise CandidateOutputError('Format repair completion was incomplete or filtered',
-                            'FORMAT_REPAIR_INCOMPLETE', 'format_repair_incomplete')
-                    return retry_content
-                edits, response_format, parsed_from = parse_edits_with_format_retry(
-                    content, candidate['finish_reason'], request_format_repair)
-                candidate['format_repair_attempted'] = parsed_from == 'format_repair_response'
-                candidate['parsed_from'] = parsed_from
-                candidate['response_parse_ok'] = True
-                candidate['response_format'] = response_format
-                candidate['failure_stage'] = 'edit_application'
-                updated = apply_edits(editable, edits, visible=contexts)
-                candidate['patch_apply_ok'] = True
-                candidate['scope_ok'] = True
-                candidate['failure_stage'] = 'static_validation'
-                candidate['validation'] = validate_updated_files(editable, updated)
-                candidate['model_patch'] = make_patch(editable, updated)
-                candidate['patch_nonempty'] = bool(candidate['model_patch'])
-                candidate['status'] = 'generated' if candidate['model_patch'] else 'empty_patch'
-                candidate['failure_class'] = None if candidate['model_patch'] else 'NO_VALID_PATCH'
-                candidate['coverage_diagnostic'] = assess_patch_coverage(
-                    repair_plan, candidate['validation']['changed_files'])
-                if candidate['model_patch']:
-                    candidate['normalized_patch_sha256'] = normalized_patch_key(editable, updated)
-                    candidate['changed_lines'] = changed_line_count(candidate['model_patch'])
-                candidate.pop('failure_stage', None)
-            except Exception as exc:
-                candidate['error_type'] = type(exc).__name__
-                candidate['error_detail'] = str(exc)[:500]
-                if isinstance(exc, CandidateOutputError):
-                    candidate['failure_stage'] = exc.failure_stage
-                    candidate['failure_class'] = exc.failure_class
-                elif not candidate.get('failure_class'):
-                    if candidate.get('failure_stage') == 'response_parse':
-                        candidate['failure_class'] = 'RESPONSE_PARSE_FAILED'
-                    elif candidate.get('failure_stage') == 'edit_application':
-                        candidate['failure_class'] = 'PATCH_NOT_APPLIED'
-                        candidate['scope_ok'] = False
-                    elif candidate.get('failure_stage') == 'static_validation':
-                        candidate['failure_class'] = 'STATIC_VALIDATION_FAILED'
-                if isinstance(exc, json.JSONDecodeError):
-                    candidate['error_location'] = {'line': exc.lineno, 'column': exc.colno}
-            save(run_dir/'candidates'/f'{index:02d}.json', candidate)
-            candidates.append(candidate)
-            print(f'[repair-candidate] method={args.method} candidate={index+1}/{protocol["candidates_per_instance"]} '
-                  f'temperature={temperature} top_p={top_p} status={candidate["status"]} '
-                  f'patch_bytes={len(candidate["model_patch"].encode())}', flush=True)
+        completed_indices = []
+        def record_completion(candidate):
+            completed_indices.append(candidate['candidate_index'])
+            save(run_dir/'candidate_progress.json', {
+                'candidate_workers': args.candidate_workers,
+                'candidate_count': protocol['candidates_per_instance'],
+                'completed_indices': sorted(completed_indices),
+            })
+        candidates = run_candidate_tasks(
+            protocol['candidates_per_instance'], args.candidate_workers,
+            lambda index: generate_candidate(
+                index, protocol, run_dir, repair_messages, token_field,
+                thinking_mode, streaming, editable, contexts, repair_plan,
+                args.method,
+            ),
+            on_complete=record_completion,
+        )
     selected = choose_candidate(candidates)
     candidate_outcomes = {}
     for candidate in candidates:
@@ -919,6 +1057,7 @@ def main():
         'model_patch': selected['model_patch'] if selected else '',
         'status': result_status,
         'protocol': protocol['name'],
+        'candidate_workers': args.candidate_workers,
         'selected_candidate': selected['candidate_index'] if selected else None,
         'candidate_count': len(candidates),
         'valid_candidate_count': sum(x.get('validation', {}).get('status') == 'passed' for x in candidates),

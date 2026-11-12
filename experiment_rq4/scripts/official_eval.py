@@ -3,11 +3,14 @@
 import argparse
 import base64
 import hashlib
+import io
 import json
+import os
 import re
+import tarfile
 from pathlib import Path
 
-ASSET_BUNDLE_SHA256 = 'c6eb082a8ab7d66362981f24ebb2a9424940de86dc5219cd8f3df95210ac0a21'
+ASSET_BUNDLE_SHA256 = '3faf1c22e3657e5cea7cf1c3c4d8fe2c7d5af6729b18fe27b2b552f08a86b4e4'
 
 
 def bundled_assets():
@@ -75,7 +78,63 @@ def run_with_git_mode(container, command, timeout, original, *, workdir, user, c
             )
             if result.exit_code:
                 raise RuntimeError('Cannot prepare Chart.js coverage directories for chromeuser')
+        runtime_file = os.environ.get('RQ4_NODE_RUNTIME_FILE', '').strip()
+        if runtime_file:
+            runtime_path = Path(runtime_file).resolve()
+            runtime = runtime_path.read_bytes()
+            expected = os.environ.get('RQ4_NODE_RUNTIME_SHA256', '').strip()
+            actual = hashlib.sha256(runtime).hexdigest()
+            if expected and actual != expected:
+                raise RuntimeError('Node runtime recovery checksum mismatch')
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode='w') as handle:
+                info = tarfile.TarInfo('node')
+                info.size = len(runtime)
+                info.mode = 0o755
+                handle.addfile(info, io.BytesIO(runtime))
+            if not container.put_archive('/usr/local/bin', archive.getvalue()):
+                raise RuntimeError('Cannot inject the verified Node runtime')
+            probe = container.exec_run(
+                ['/usr/local/bin/node', '--version'], workdir=workdir, user=user,
+            )
+            version = probe.output.decode('utf-8', errors='replace').strip()
+            expected_version = os.environ.get('RQ4_NODE_RUNTIME_VERSION', '').strip()
+            if probe.exit_code or (expected_version and version != expected_version):
+                raise RuntimeError(f'Injected Node runtime failed validation: {version}')
+            print(f'[rq4] Injected verified Node runtime {version}; '
+                  'using a clean PATH to bypass the damaged image layer.', flush=True)
+            command = (
+                '/bin/bash -lc "export PATH=/usr/local/bin:/usr/local/sbin:'
+                '/usr/sbin:/usr/bin:/sbin:/bin; exec /bin/bash /eval.sh"'
+            )
     return original(container, command, timeout)
+
+
+class _ContainersWithShm:
+    def __init__(self, containers, size):
+        self._containers = containers
+        self._size = size
+
+    def create(self, *args, **kwargs):
+        kwargs.setdefault('shm_size', self._size)
+        return self._containers.create(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._containers, name)
+
+
+class _DockerClientWithShm:
+    def __init__(self, client, size):
+        self._client = client
+        self.containers = _ContainersWithShm(client.containers, size)
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+def docker_client_with_chartjs_shm(original, size='2g'):
+    """Give browser-heavy Chart.js controls enough shared memory to finish."""
+    return _DockerClientWithShm(original(), size)
 
 
 def parse_calypso_without_stray_brace(log, test_spec, original):
@@ -191,6 +250,11 @@ def main():
             chartjs=chartjs,
         )
     run_evaluation.exec_run_with_timeout = normalized_exec
+    if chartjs:
+        original_client = run_evaluation._docker_client
+        run_evaluation._docker_client = lambda: docker_client_with_chartjs_shm(
+            original_client)
+        print('[rq4] Chart.js evaluation containers use a 2 GiB /dev/shm.', flush=True)
     if rows:
         run_evaluation.run_instances(
             predictions, rows, args.workers, args.run_id, args.timeout,

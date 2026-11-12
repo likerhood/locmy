@@ -86,8 +86,10 @@ python3 scripts/verify_bundle.py
 - 细粒度定位要求纯 JSON；为兼容部分 OpenAI 兼容模型，也接受且仅接受一个可独立解析的 `json` Markdown 代码块。下游修复使用 CoSIL 风格的英文推理加 SEARCH/REPLACE 块，并保留旧 JSON `edits` 作为兼容输入。响应格式、结束原因和失败阶段写入候选记录；格式失败不会作为同一收费请求自动重发。若所有修复候选都因 API 基础设施失败且没有可评测补丁，该方法样本标为 `infrastructure_failure`，分析结果保持 `unknown`，不计作未解决。
 - 下游流程按 CoSIL RQ3 的结构适配到所选模型：每种方法先保留最多 Top-15 文件及其上游函数排序，再执行一次共享的函数/行区间定位；修复上下文只包含这些区间及前后各 10 行。随后生成 10 个候选（1 个 temperature=0，9 个 temperature=0.8），按归一化补丁投票和稳定破平规则选择，最终只评测一个补丁。
 - `Top-15` 表示使用上游实际提供的前 15 名。CoSIL 历史快照只有 5 个文件、GALA 某些样本少于 15 个时，程序使用全部已有项，不补造排名。每条 `normalized` 记录同时保存 `found_files` 和 `found_functions`；上游函数为空时，共享细粒度定位阶段从候选文件函数定义清单中选择。
-- 这不是逐字复刻 CoSIL 的 `patch_gen.sh`：模型由所选 env 文件决定，修复输出采用 CoSIL SEARCH/REPLACE，候选选择使用归一化去重多数票；当前不运行 CoSIL 的模型生成 reproduction/regression 测试，避免额外测试生成质量成为五种定位方法之间的混杂变量。no-op/gold 对照和最终官方 SWE-bench 测试保持不变。
-- 每个样本方法最多产生 11 次收费请求，所以 1 样本 × 5 方法最多 55 次，50 样本 × 5 方法最多 2750 次。`--mode check` 会在收费前打印精确计划数。每次请求独立记录在 `attempts/<method>/<instance>/paid_calls/`；只有完整响应可自动复用。明确的 429/500/502/503/504 按 `RQ4_HTTP_RETRIES` 有界重试。单次请求默认等待 900 秒；修复候选若发生结果不确定的超时或连接失败，会保留现场、记为 `failed:api_request` 并继续后续候选，不重发同一候选。共享细粒度定位失败仍停止该运行，因为缺少定位上下文时继续会改变实验协议。
+- 这不是逐字复刻 CoSIL 的 `patch_gen.sh`：模型由所选 env 文件决定，修复输出采用 CoSIL SEARCH/REPLACE，候选选择使用归一化去重多数票；当前不运行 CoSIL 的模型生成 reproduction/regression 测试，避免额外测试生成质量成为默认四种定位方法之间的混杂变量。no-op/gold 对照和最终官方 SWE-bench 测试保持不变。
+- 默认只运行 LocAgent、CoSIL、GALA、MAGNET，GraphLocator 仍可通过 `--methods` 显式选择。每个样本方法最多产生 11 次收费请求，所以 1 样本 × 4 方法最多 44 次，50 样本 × 4 方法的名义上限是 2200 次。当前 SWE50 有 3 个空文件定位单元会在 API 前跳过，因此现有输入的实际最大计划是 2167 次（197 次细粒度定位和 1970 次候选修复）；细粒度定位返回空时还会更少。`--mode check` 会同时打印名义上限、空定位列表和实际最大计划数。每次请求独立记录在 `attempts/<method>/<instance>/paid_calls/`；只有完整响应可自动复用。明确的 429/500/502/503/504 按 `RQ4_HTTP_RETRIES` 有界重试。单次请求默认等待 900 秒；修复候选若发生结果不确定的超时或连接失败，会保留现场、记为 `failed:api_request` 并继续后续候选，不重发同一候选。共享细粒度定位失败仍停止该运行，因为缺少定位上下文时继续会改变实验协议。
+- MiMo 正式修复协议显式发送 `thinking={"type":"enabled"}`，并用官方 `max_completion_tokens=131072` 最大输出上限；该上限同时覆盖推理和最终答案，不是预付或固定消耗量，模型正常停止时只按实际 token 计量。MiMo 思考模式会覆盖请求中的 `temperature/top_p`，所以十个候选应解释为同一推荐采样配置下的独立生成。旧的 8192-token 批次不能与该协议续跑或合并，必须使用新 run-id。
+- 深度思考请求使用 SSE 流式响应，并请求 `stream_options.include_usage=true`。程序把连续的 `reasoning_content`/`content` 增量重建为原有完整 `response.json`，同时保存 `stream.jsonl` 和精确 usage；这避免非流式 Token Plan 连接在约 900 秒时被网关关闭。流未收到 `[DONE]` 或 `finish_reason` 时仍按结果不确定处理，不自动重发。
 - Omni 最新结果尚未齐备，本包不宣称能完成两个数据集的正式实验。
 - 更新定位输入或模型后使用新 run-id，不混用旧结果。
 

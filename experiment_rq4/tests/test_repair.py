@@ -5,6 +5,9 @@ import sys
 import tempfile
 import unittest
 import os
+import socket
+import threading
+import time
 import urllib.error
 from unittest.mock import patch
 from pathlib import Path
@@ -16,12 +19,37 @@ from repair import (LOCALIZATION_SYSTEM_PROMPT, REPAIR_SYSTEM_PROMPT, api_call, 
                     format_repair_messages, line_evidence, localized_context,
                     failed_request_candidate, make_patch, normalized_patch_key, parse_locations, parse_model_edits,
                     parse_edits_with_format_retry, parse_localization, CandidateOutputError,
+                    run_candidate_tasks,
                     SEARCH_MARKER, DIVIDER_MARKER, REPLACE_MARKER, validate_path,
                     validate_updated_files)
 from preflight import load_env
 
 
 class RepairTests(unittest.TestCase):
+    def test_candidate_tasks_bound_concurrency_and_restore_index_order(self):
+        state = {'active': 0, 'maximum': 0}
+        lock = threading.Lock()
+
+        def callback(index):
+            with lock:
+                state['active'] += 1
+                state['maximum'] = max(state['maximum'], state['active'])
+            time.sleep(0.03 if index % 2 == 0 else 0.01)
+            with lock:
+                state['active'] -= 1
+            return {'candidate_index': index}
+
+        results = run_candidate_tasks(6, 2, callback)
+        self.assertEqual(state['maximum'], 2)
+        self.assertEqual([item['candidate_index'] for item in results], list(range(6)))
+
+    def test_candidate_tasks_serial_mode_is_unchanged(self):
+        order = []
+        results = run_candidate_tasks(
+            3, 1, lambda index: order.append(index) or {'candidate_index': index})
+        self.assertEqual(order, [0, 1, 2])
+        self.assertEqual([item['candidate_index'] for item in results], [0, 1, 2])
+
     def test_api_uses_mimo_max_completion_tokens_and_thinking(self):
         class Response:
             def __enter__(self):
@@ -80,6 +108,53 @@ class RepairTests(unittest.TestCase):
                 with self.assertRaises(urllib.error.URLError):
                     api_call(Path(tmp) / 'connection', [], 0, 10)
             self.assertEqual(request.call_count, 1)
+
+    def test_api_retries_preconnect_dns_failure(self):
+        class Response:
+            def __enter__(self):
+                return io.StringIO('{"id":"ok","choices":[],"usage":{}}')
+
+            def __exit__(self, *args):
+                return False
+
+        env = {'RQ4_MODEL': 'model', 'RQ4_BASE_URL': 'https://api.example/v1',
+               'RQ4_API_KEY': 'test', 'RQ4_HTTP_RETRIES': '2',
+               'RQ4_HTTP_RETRY_SLEEPS': '0'}
+        dns_error = urllib.error.URLError(socket.gaierror(-3, 'temporary failure'))
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env, clear=True):
+            call_dir = Path(tmp) / 'dns'
+            with patch('urllib.request.urlopen', side_effect=[dns_error, Response()]) as request:
+                result, _ = api_call(call_dir, [], 0, 10)
+            self.assertEqual(request.call_count, 2)
+            self.assertEqual(result['http_attempt_count'], 2)
+            attempt = json.loads((call_dir / 'attempt.json').read_text())
+            self.assertEqual(attempt['transport_failures'][0]['error_reason_type'], 'gaierror')
+
+    def test_resume_archives_proven_preconnect_dns_failure(self):
+        class Response:
+            def __enter__(self):
+                return io.StringIO('{"id":"ok","choices":[],"usage":{}}')
+
+            def __exit__(self, *args):
+                return False
+
+        env = {'RQ4_MODEL': 'model', 'RQ4_BASE_URL': 'https://api.example/v1',
+               'RQ4_API_KEY': 'test', 'RQ4_HTTP_RETRIES': '0'}
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, env, clear=True):
+            call_dir = Path(tmp) / 'fine_localization'
+            call_dir.mkdir()
+            (call_dir / 'attempt.json').write_text('{}')
+            (call_dir / 'failure.json').write_text(json.dumps({
+                'status': 'failed', 'error_type': 'URLError',
+                'error_reason_type': 'gaierror', 'http_attempt_count': 1,
+            }))
+            with patch('urllib.request.urlopen', return_value=Response()) as request:
+                result, _ = api_call(call_dir, [], 0, 10)
+            self.assertEqual(request.call_count, 1)
+            self.assertEqual(result['status'], 'completed')
+            history = list((Path(tmp) / 'retry_history/fine_localization').iterdir())
+            self.assertEqual(len(history), 1)
+            self.assertTrue((history[0] / 'failure.json').is_file())
 
     def test_uncertain_repair_request_becomes_auditable_failed_candidate(self):
         with tempfile.TemporaryDirectory() as tmp:

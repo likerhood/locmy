@@ -100,7 +100,7 @@ def main():
     if '--help' in sys.argv:
         return subprocess.call([sys.executable, str(ROOT/'scripts/pipeline.py'), *sys.argv[1:]])
     parser = argparse.ArgumentParser(add_help=False)
-    parser.add_argument('--run-id', default='swe_mimo_serial_v2')
+    parser.add_argument('--run-id', default='swe_four_method_v1')
     args, _ = parser.parse_known_args()
     if not re.fullmatch(r'[A-Za-z0-9_.-]+', args.run_id) or args.run_id in ('.', '..'):
         raise SystemExit('Invalid run-id')

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -14,6 +15,8 @@ from analyze_batch import analyze, official_reports
 from preflight import load_env
 
 ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_METHODS = ('locagent', 'cosil', 'gala', 'magnet')
+SUPPORTED_METHODS = frozenset((*DEFAULT_METHODS, 'graphlocator'))
 
 
 def read_rows(path):
@@ -25,6 +28,49 @@ def save(path, value):
     temp = path.with_suffix('.tmp')
     temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
     temp.replace(path)
+
+
+def reconcile_candidate_workers(batch, previous, candidate, allow_upgrade):
+    """Allow only an explicit, audited 1 -> 2 execution-schedule upgrade."""
+    old = previous.get('candidate_workers', 1)
+    new = candidate.get('candidate_workers', 1)
+    if old == new:
+        return previous
+    if not allow_upgrade or old != 1 or new != 2:
+        raise ValueError('Candidate worker configuration changed; use a new run-id')
+    amendment = {
+        'time': time.time(),
+        'change': 'candidate_workers',
+        'from': old,
+        'to': new,
+        'completed_samples': len(list((batch/'completed_samples').glob('*.json'))),
+        'deferred_samples': len(list((batch/'deferred_samples').glob('*.json'))),
+        'note': 'Explicit user-requested execution scheduling upgrade; prompts, model, candidates, selection, and evaluation protocol are unchanged.',
+    }
+    with (batch/'execution_amendments.jsonl').open('a') as handle:
+        handle.write(json.dumps(amendment, ensure_ascii=False) + '\n')
+    compatible = dict(previous)
+    compatible['candidate_workers'] = new
+    return compatible
+
+
+def archive_infrastructure_failure(batch, method, instance, record_path):
+    """Preserve a retryable paid attempt before allowing an explicit resume.
+
+    Infrastructure failures contain useful API evidence but no usable patch.  A
+    normal completed record is intentionally not retried, so resuming the same
+    run would otherwise skip it forever.  Move that one attempt into a
+    timestamped history directory and let generation create a fresh attempt.
+    """
+    stamp = time.strftime('%Y%m%d-%H%M%S')
+    history = batch / 'retry_history' / method / instance / stamp
+    history.mkdir(parents=True, exist_ok=False)
+    shutil.copy2(record_path, history / 'record.json')
+    old_attempt = batch / 'attempts' / method / instance
+    if old_attempt.exists():
+        shutil.move(str(old_attempt), str(history / 'attempt'))
+    record_path.unlink()
+    return history
 
 
 ACTIVE_RESOURCES = None
@@ -43,6 +89,23 @@ def report_outcome(report, method, instance):
 def repo_for(sample):
     from git_cache import repo_for as cached
     return cached(ROOT, sample, ACTIVE_RESOURCES)
+
+
+def run_repair_resumably(command, log_path, timeout, max_continuations):
+    """Continue a durable repair worker after its outer wall-clock guard fires."""
+    for continuation in range(max_continuations + 1):
+        mode = 'w' if continuation == 0 else 'a'
+        try:
+            with log_path.open(mode) as log:
+                ACTIVE_RESOURCES.run(
+                    command, stdout=log, stderr=subprocess.STDOUT, timeout=timeout,
+                )
+            return
+        except subprocess.TimeoutExpired:
+            if continuation >= max_continuations:
+                raise
+            print(f'Protected repair timeout; resume durable worker '
+                  f'{continuation + 1}/{max_continuations}', flush=True)
 
 
 def harness(batch, method, predictions, dataset_file, workers, timeout):
@@ -72,6 +135,11 @@ def generate_one(batch, args, sample):
     for method in args.methods:
         record_path = batch/'records'/method/f'{instance}.json'
         record = json.loads(record_path.read_text()) if record_path.exists() else None
+        if (record and record.get('status') == 'completed'
+                and record.get('prediction', {}).get('status') == 'infrastructure_failure'):
+            history = archive_infrastructure_failure(batch, method, instance, record_path)
+            print(f'Retry archived infrastructure failure {method}/{instance}: {history}', flush=True)
+            record = None
         if record and record.get('status') == 'completed':
             print(f'Skip recorded attempt {method}/{instance}', flush=True)
             continue
@@ -116,13 +184,16 @@ def generate_one(batch, args, sample):
                                'note':'Durable paid subcalls are resumable only when response and result both exist.'})
         command = [sys.executable, str(ROOT/'scripts/repair.py'), '--dataset', args.dataset,
                    '--method', method, '--instance-id', instance, '--repo', str(repo),
-                   '--env-file', str(args.env_file.resolve()), '--output-dir', str(out), '--execute']
-        with (out.parent/f'{instance}.log').open('w') as log:
-            protocol = json.loads((ROOT/'configs/protocol.json').read_text())
-            paid_calls = 1 + protocol.get('candidates_per_instance', 1)
-            request_timeout = int(os.getenv('RQ4_REQUEST_TIMEOUT','900'))
-            ACTIVE_RESOURCES.run(command, stdout=log, stderr=subprocess.STDOUT,
-                                 timeout=(request_timeout + 30) * paid_calls + 120)
+                   '--env-file', str(args.env_file.resolve()), '--output-dir', str(out),
+                   '--candidate-workers', str(args.candidate_workers), '--execute']
+        protocol = json.loads((ROOT/'configs/protocol.json').read_text())
+        paid_calls = 1 + protocol.get('candidates_per_instance', 1)
+        request_timeout = int(os.getenv('RQ4_REQUEST_TIMEOUT','900'))
+        run_repair_resumably(
+            command, out.parent/f'{instance}.log',
+            timeout=(request_timeout + 30) * paid_calls + 120,
+            max_continuations=paid_calls,
+        )
         prediction = read_rows(out/'prediction.jsonl')[0]
         ACTIVE_RESOURCES.run([sys.executable, str(ROOT/'scripts/check_patch.py'), '--run-dir', str(out)])
         applied = json.loads((out/'application_check.json').read_text())['applied']
@@ -213,13 +284,16 @@ def main():
     from resources import Resources
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--dataset', choices=['swe','omni'], default='swe')
-    p.add_argument('--methods', nargs='+', default=['locagent','cosil','gala','graphlocator','magnet'])
+    p.add_argument('--methods', nargs='+', default=list(DEFAULT_METHODS))
     p.add_argument('--mode', choices=['check','generate','evaluate','all'], default='check')
     p.add_argument('--limit', type=int, default=50)
-    p.add_argument('--run-id', default='swe_mimo_serial_v2')
+    p.add_argument('--run-id', default='swe_four_method_v1')
     p.add_argument('--env-file', type=Path, default=ROOT/'.env.local')
     p.add_argument('--eval-dataset', type=Path, default=ROOT/'data/evaluation_only/swe50.harness.jsonl')
     p.add_argument('--workers', type=int, default=1)
+    p.add_argument('--candidate-workers', type=int, choices=[1, 2], default=1)
+    p.add_argument('--allow-candidate-worker-upgrade', action='store_true',
+                   help='Audit and allow only a 1-to-2 candidate scheduling upgrade for an existing run.')
     p.add_argument('--test-timeout', type=int, default=1800)
     p.add_argument('--min-free-gb', type=float)
     p.add_argument('--image-cache', choices=['budget','sample'])
@@ -235,7 +309,7 @@ def main():
         p.error('Use a valid run-id, limit 1..50, and --workers 1 (serial mode only)')
     if not 0 < args.min_free_gb < float('inf') or args.image_cache not in ['budget','sample'] or args.test_timeout <= 0:
         p.error('Invalid resource limits')
-    if len(set(args.methods)) != len(args.methods) or not set(args.methods) <= {'magnet','locagent','cosil','gala','graphlocator'}:
+    if len(set(args.methods)) != len(args.methods) or not set(args.methods) <= SUPPORTED_METHODS:
         p.error('Invalid/duplicate methods')
     samples = read_rows(ROOT/'data/inputs'/f'{args.dataset}50.jsonl')[:args.limit]
     for sample in samples:
@@ -246,6 +320,8 @@ def main():
     source_paths += [ROOT/'scripts/preflight.py'] if (ROOT/'scripts/preflight.py').exists() else []
     source_paths += [ROOT/'scripts'/name for name in ['run_batch.py','official_eval.py','resources.py','git_cache.py','analyze_batch.py'] if (ROOT/'scripts'/name).exists()]
     source_paths += [ROOT/'configs/harness_lock.json'] if (ROOT/'configs/harness_lock.json').exists() else []
+    eligible_sample_methods = 0
+    missing_localization = []
     for method in args.methods:
         path = ROOT/'normalized'/args.dataset/f'{method}.jsonl'
         if not path.exists():
@@ -253,16 +329,30 @@ def main():
         rows = {r['instance_id']:r for r in read_rows(path)}
         if any(rows.get(r['instance_id'],{}).get('status') != 'available' for r in samples):
             p.error('Incomplete prediction coverage; no paid calls started')
+        for sample in samples:
+            if rows[sample['instance_id']].get('found_files'):
+                eligible_sample_methods += 1
+            else:
+                missing_localization.append({
+                    'method': method,
+                    'instance_id': sample['instance_id'],
+                })
         source_paths.append(path)
     hashes = {str(path.relative_to(ROOT)):hashlib.sha256(path.read_bytes()).hexdigest() for path in source_paths}
     protocol = json.loads((ROOT/'configs/protocol.json').read_text())
     if args.mode == 'check':
         calls_per_method = 1 + protocol.get('candidates_per_instance', 1)
+        nominal_sample_methods = len(samples) * len(args.methods)
         print(json.dumps({'dataset':args.dataset,'samples':len(samples),'methods':args.methods,
-            'planned_api_calls':len(samples)*len(args.methods)*calls_per_method,
+            'sample_method_units':nominal_sample_methods,
+            'eligible_sample_method_units':eligible_sample_methods,
+            'skipped_missing_localization':missing_localization,
+            'nominal_api_call_upper_bound':nominal_sample_methods*calls_per_method,
+            'planned_api_calls':eligible_sample_methods*calls_per_method,
             'calls_per_sample_method':calls_per_method,
-            'fine_localization_calls':len(samples)*len(args.methods),
-            'repair_candidate_calls':len(samples)*len(args.methods)*protocol.get('candidates_per_instance', 1),
+            'fine_localization_calls':eligible_sample_methods,
+            'repair_candidate_calls':eligible_sample_methods*protocol.get('candidates_per_instance', 1),
+            'candidate_workers':args.candidate_workers,
             'api_configured':all(os.getenv(k) for k in ['RQ4_API_KEY','RQ4_MODEL','RQ4_BASE_URL']),
             'eval_dataset_exists':args.eval_dataset.exists(),'min_free_gb':args.min_free_gb,'image_cache':args.image_cache,
             'schedule':'repo_then_sample_then_method','status':'offline_check_no_calls'},indent=2))
@@ -301,17 +391,33 @@ def main():
             'hashes':hashes,'model':os.getenv('RQ4_MODEL',''),'endpoint_hash':hashlib.sha256(os.getenv('RQ4_BASE_URL','').encode()).hexdigest(),
             'api_direct':os.getenv('RQ4_API_DIRECT','').strip().lower() in ('1','true','yes'),
             'github_direct':os.getenv('RQ4_GITHUB_DIRECT','1').strip().lower() in ('1','true','yes'),
-            'protocol':protocol.get('name','legacy_test_fixture'),'test_timeout':args.test_timeout}
+            'protocol':protocol.get('name','legacy_test_fixture'),'test_timeout':args.test_timeout,
+            'candidate_workers':args.candidate_workers}
         if args.eval_failure_policy == 'defer':
             manifest['evaluation_policy'] = dict(on_failure='defer', max_consecutive=args.max_consecutive_eval_failures)
         existing = batch/'manifest.json'
         if existing.exists():
             previous = json.loads(existing.read_text())
+            previous = reconcile_candidate_workers(
+                batch, previous, manifest, args.allow_candidate_worker_upgrade)
             candidate = dict(manifest); candidate['hashes'] = dict(hashes)
             if 'evaluator_dataset' not in previous['hashes']:
                 candidate['hashes'].pop('evaluator_dataset',None)
             if previous != candidate:
-                raise ValueError('Batch configuration changed; use a new run-id')
+                # A retry-policy-only runner patch is safe for an interrupted
+                # batch: inputs, protocol, endpoint and model must still
+                # match, while runner source hashes are allowed to advance.
+                previous_compat = dict(previous)
+                candidate_compat = dict(candidate)
+                previous_hashes = dict(previous_compat.pop('hashes', {}))
+                candidate_hashes = dict(candidate_compat.pop('hashes', {}))
+                for runner in ('scripts/run_batch.py', 'scripts/repair.py'):
+                    previous_hashes.pop(runner, None)
+                    candidate_hashes.pop(runner, None)
+                previous_compat['hashes'] = previous_hashes
+                candidate_compat['hashes'] = candidate_hashes
+                if previous_compat != candidate_compat:
+                    raise ValueError('Batch configuration changed; use a new run-id')
         save(existing,manifest)
         try:
             ACTIVE_RESOURCES = Resources(ROOT,batch,args.min_free_gb,args.image_cache,docker=testing)

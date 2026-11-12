@@ -22,11 +22,17 @@ class ChartAssetsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'checksum mismatch'):
                 bundled_assets()
 
-    def test_all_six_blobs_match_official_patch_and_urls(self):
+    def test_all_bundled_blobs_include_gap_amendment_assets(self):
         with gzip.open(ROOT / 'data/evaluation_seed/swe50.harness.jsonl.gz', 'rt') as handle:
             row = next(r for r in map(json.loads, handle) if r['instance_id'] == migration.INSTANCE)
         bundle = bundled_assets()
-        self.assertEqual(len(bundle), 6)
+        self.assertEqual(len(bundle), 10)
+        self.assertTrue({
+            ('chartjs__Chart.js-8567', 'test/fixtures/core.layouts/long-labels.png'),
+            ('chartjs__Chart.js-8567', 'test/fixtures/core.layouts/refit-vertical-boxes.png'),
+            ('chartjs__Chart.js-8567', 'test/fixtures/scale.time/invalid-data.png'),
+            ('chartjs__Chart.js-9766', 'test/fixtures/controller.line/stacking/bounds-data.png'),
+        }.issubset({(instance, path) for instance, path, _ in bundle}))
         original = Mock(side_effect=AssertionError('Network must not be used'))
         for asset in row['image_assets']['test_patch']:
             data = resolve_required_asset(dict(asset, instance_id=row['instance_id']), None,

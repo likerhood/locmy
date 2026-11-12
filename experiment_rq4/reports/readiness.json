@@ -43,17 +43,16 @@
     }
   },
   "formal_blockers": [
-    "50+50 environment no-op/gold controls not executed",
-    "MAGNET SWE front_rank_v1 and Omni r4 are different versions; choose common frozen method",
+    "Per-run no-op/gold controls must pass; inspect batch evaluation reports",
+    "MAGNET SWE addtest3 and Omni r4 are different versions; choose common frozen method",
     "input compact evidence provenance and model identity require audit",
     "development repair uses byte budget; formal tokenizer-aware context policy not frozen",
-    "Docker daemon unavailable in this environment",
     "omni/locagent: missing predictions",
     "omni/cosil: missing predictions",
     "omni/gala: missing predictions",
     "omni/graphlocator: missing predictions"
   ],
-  "docker_available": false,
+  "docker_available": true,
   "agentless_commit": "5ce5888b9f149beaace393957a55ea8ee46c9f71",
-  "swebench_import_available": false
+  "swebench_import_available": true
 }

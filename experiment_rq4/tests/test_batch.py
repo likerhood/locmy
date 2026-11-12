@@ -1,9 +1,10 @@
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from analyze_batch import analyze, official_reports
@@ -16,6 +17,40 @@ def put(path,obj):
 
 
 class BatchTests(unittest.TestCase):
+    def test_candidate_worker_upgrade_requires_explicit_audited_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            batch = Path(tmp)
+            (batch/'completed_samples').mkdir()
+            (batch/'deferred_samples').mkdir()
+            previous = {'candidate_workers': 1}
+            candidate = {'candidate_workers': 2}
+            with self.assertRaises(ValueError):
+                run_batch.reconcile_candidate_workers(
+                    batch, previous, candidate, allow_upgrade=False)
+            compatible = run_batch.reconcile_candidate_workers(
+                batch, previous, candidate, allow_upgrade=True)
+            self.assertEqual(compatible['candidate_workers'], 2)
+            amendment = json.loads((batch/'execution_amendments.jsonl').read_text())
+            self.assertEqual((amendment['from'], amendment['to']), (1, 2))
+
+    def test_default_methods_exclude_graphlocator_but_keep_it_supported(self):
+        self.assertEqual(run_batch.DEFAULT_METHODS,
+                         ('locagent', 'cosil', 'gala', 'magnet'))
+        self.assertNotIn('graphlocator', run_batch.DEFAULT_METHODS)
+        self.assertIn('graphlocator', run_batch.SUPPORTED_METHODS)
+
+    def test_repair_worker_continues_after_outer_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            resources = type('Resources', (), {})()
+            resources.run = Mock(side_effect=[
+                subprocess.TimeoutExpired('repair', 10), None,
+            ])
+            with patch.object(run_batch, 'ACTIVE_RESOURCES', resources):
+                run_batch.run_repair_resumably(
+                    ['repair'], Path(tmp)/'repair.log', timeout=10, max_continuations=2,
+                )
+            self.assertEqual(resources.run.call_count, 2)
+
     def test_unknown_not_success_and_fixed_denominator(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)

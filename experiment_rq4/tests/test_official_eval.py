@@ -6,7 +6,11 @@ import unittest
 from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from official_eval import parse_calypso_without_stray_brace, run_with_git_mode
+from official_eval import (
+    docker_client_with_chartjs_shm,
+    parse_calypso_without_stray_brace,
+    run_with_git_mode,
+)
 
 
 class FakeContainer:
@@ -20,6 +24,29 @@ class FakeContainer:
 
 
 class OfficialEvalTests(unittest.TestCase):
+    def test_chartjs_client_adds_shm_without_overriding_explicit_value(self):
+        calls = []
+        class FreshCollectionsClient:
+            images = 'images'
+            api = 'api'
+
+            @property
+            def containers(self):
+                return SimpleNamespace(
+                    create=lambda *args, **kwargs: calls.append((args, kwargs)),
+                    get=lambda name: f'container:{name}',
+                )
+
+        client = FreshCollectionsClient()
+        wrapped = docker_client_with_chartjs_shm(lambda: client)
+        wrapped.containers.create(image='chartjs')
+        wrapped.containers.create(image='chartjs', shm_size='3g')
+        self.assertEqual(calls[0][1]['shm_size'], '2g')
+        self.assertEqual(calls[1][1]['shm_size'], '3g')
+        self.assertEqual(wrapped.containers.get('old'), 'container:old')
+        self.assertEqual(wrapped.images, 'images')
+        self.assertEqual(wrapped.api, 'api')
+
     def test_git_mode_is_set_before_unmodified_official_script(self):
         container = FakeContainer()
         observed = []

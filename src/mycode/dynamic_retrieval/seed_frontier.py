@@ -41,7 +41,16 @@ def demote_generated_outputs(ranked, *, files, issue_text):
             + [item for item in ranked if item.path in outputs]), mappings
 
 
-def restore_seed_frontier(ranked, seeds, *, index, review, top_k, limit=2):
+def restore_seed_frontier(
+    ranked,
+    seeds,
+    *,
+    index,
+    review,
+    top_k,
+    limit=2,
+    minimum_supporting_axes=0,
+):
     """Preserve entry-point priors without duplicating or inventing paths.
 
     Downstream responsibility verification may still promote a challenger.
@@ -58,6 +67,9 @@ def restore_seed_frontier(ranked, seeds, *, index, review, top_k, limit=2):
             break
         path = seed.path
         decision = decisions.get(path, {})
+        belief = getattr(seed, "belief", {}) or {}
+        supporting_axes = sorted(set(belief.get("supporting_axes", []) or []))
+        persistent_seed = bool(belief.get("persistent_seed"))
         reason = None
         if path not in index.files or not index.files[path].strip():
             reason = "source_unavailable"
@@ -69,12 +81,37 @@ def restore_seed_frontier(ranked, seeds, *, index, review, top_k, limit=2):
             for code in decision.get("counterevidence", [])
         ):
             reason = "grounded_counterevidence"
+        elif (
+            minimum_supporting_axes > 0
+            and not persistent_seed
+            and len(supporting_axes) < minimum_supporting_axes
+        ):
+            reason = "insufficient_multi_channel_support"
         if reason:
-            rejected.append({"path": path, "reason": reason})
+            rejection = {"path": path, "reason": reason}
+            if reason == "insufficient_multi_channel_support":
+                rejection.update(
+                    {
+                        "supporting_axis_count": len(supporting_axes),
+                        "supporting_axes": supporting_axes,
+                        "persistent_seed": persistent_seed,
+                    }
+                )
+            rejected.append(rejection)
             continue
         if path not in {item.path for item in chosen}:
             item = copy.deepcopy(recalled.get(path, seed))
             item.reasons.append("retained_fast_seed_prior")
+            if getattr(item, "belief", None) is None:
+                item.belief = {}
+            item.belief.setdefault(
+                "seed_retention",
+                {
+                    "supporting_axis_count": len(supporting_axes),
+                    "supporting_axes": supporting_axes,
+                    "persistent_seed": persistent_seed,
+                },
+            )
             chosen.append(item)
     retained = {item.path for item in chosen}
     ordered = chosen + [item for item in ranked if item.path not in retained]
@@ -83,4 +120,5 @@ def restore_seed_frontier(ranked, seeds, *, index, review, top_k, limit=2):
         "retained": [item.path for item in chosen],
         "rejected": rejected,
         "limit": limit,
+        "minimum_supporting_axes": minimum_supporting_axes,
     }

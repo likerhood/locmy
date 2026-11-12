@@ -21,6 +21,8 @@ class ModelProtocolProfile:
     require_entity_snippet_alignment: bool = False
     strict_partial_owner_evidence: bool = False
     verified_entity_owner_boost: float = 0.0
+    final_seed_retention_limit: int = 2
+    seed_retention_min_axes: int = 0
 
 
 _PROFILES = {
@@ -42,6 +44,8 @@ _PROFILES = {
         require_entity_snippet_alignment=True,
         strict_partial_owner_evidence=True,
         verified_entity_owner_boost=240.0,
+        final_seed_retention_limit=3,
+        seed_retention_min_axes=3,
     ),
 }
 

@@ -24,6 +24,8 @@ def test_kimi_profile_is_inferred_from_api_model() -> None:
     assert profile.require_entity_snippet_alignment is True
     assert profile.strict_partial_owner_evidence is True
     assert profile.verified_entity_owner_boost == 240.0
+    assert profile.final_seed_retention_limit == 3
+    assert profile.seed_retention_min_axes == 3
 
 
 def test_explicit_profile_overrides_model_name() -> None:

@@ -7500,7 +7500,18 @@ def dynamic_localize(
         index=index,
         review=merged_candidate_review,
         top_k=top_k,
-        limit=_env_int("MYCODE_FINAL_SEED_PREFIX", 2, minimum=0),
+        limit=profile_int(
+            "MYCODE_FINAL_SEED_PREFIX",
+            "final_seed_retention_limit",
+            2,
+            minimum=0,
+        ),
+        minimum_supporting_axes=profile_int(
+            "MYCODE_FINAL_SEED_MIN_AXES",
+            "seed_retention_min_axes",
+            0,
+            minimum=0,
+        ),
     )
     rank_stage_snapshots["seed_retention"] = _rank_stage_snapshot(ranked, limit=top_k)
     ranked, cross_round_frontier = _cross_round_candidate_frontier(

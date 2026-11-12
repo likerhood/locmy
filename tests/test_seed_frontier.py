@@ -9,6 +9,17 @@ def row(path):
     return SimpleNamespace(path=path, reasons=[])
 
 
+def evidence_row(path, axes=(), *, persistent=False):
+    return SimpleNamespace(
+        path=path,
+        reasons=[],
+        belief={
+            "supporting_axes": list(axes),
+            "persistent_seed": persistent,
+        },
+    )
+
+
 def test_seed_union_retains_multi_file_targets_and_tail_order():
     index = SimpleNamespace(files={p: "function f() {}" for p in ("src/a.js", "src/b.js", "src/c.js")})
     ranked, report = restore_seed_frontier(
@@ -64,3 +75,71 @@ def test_explicit_build_request_keeps_output_order():
     )
     assert ranked == original
     assert not mappings
+
+
+def test_kimi_style_retention_keeps_third_multi_channel_seed():
+    paths = ("src/a.js", "src/b.js", "src/c.js", "src/noise.js")
+    index = SimpleNamespace(files={path: "source" for path in paths})
+    seeds = [
+        evidence_row("src/a.js", ("concern", "flow", "tool")),
+        evidence_row("src/b.js", ("effect", "entity", "tool")),
+        evidence_row(
+            "src/c.js",
+            ("concern", "evidence_role", "explicit_entity", "flow", "tool"),
+        ),
+    ]
+
+    ranked, report = restore_seed_frontier(
+        [row("src/noise.js")],
+        seeds,
+        index=index,
+        review={},
+        top_k=4,
+        limit=3,
+        minimum_supporting_axes=3,
+    )
+
+    assert [item.path for item in ranked] == [
+        "src/a.js",
+        "src/b.js",
+        "src/c.js",
+        "src/noise.js",
+    ]
+    assert report["retained"] == ["src/a.js", "src/b.js", "src/c.js"]
+    assert report["minimum_supporting_axes"] == 3
+
+
+def test_multi_channel_retention_rejects_weak_seed_but_keeps_persistent_seed():
+    paths = ("src/strong.js", "src/weak.js", "src/persistent.js")
+    index = SimpleNamespace(files={path: "source" for path in paths})
+    seeds = [
+        evidence_row("src/strong.js", ("concern", "flow", "tool")),
+        evidence_row("src/weak.js", ("tool",)),
+        evidence_row("src/persistent.js", ("tool",), persistent=True),
+    ]
+
+    ranked, report = restore_seed_frontier(
+        [row("src/weak.js")],
+        seeds,
+        index=index,
+        review={},
+        top_k=3,
+        limit=3,
+        minimum_supporting_axes=3,
+    )
+
+    assert [item.path for item in ranked] == [
+        "src/strong.js",
+        "src/persistent.js",
+        "src/weak.js",
+    ]
+    assert report["retained"] == ["src/strong.js", "src/persistent.js"]
+    assert report["rejected"] == [
+        {
+            "path": "src/weak.js",
+            "reason": "insufficient_multi_channel_support",
+            "supporting_axis_count": 1,
+            "supporting_axes": ["tool"],
+            "persistent_seed": False,
+        }
+    ]

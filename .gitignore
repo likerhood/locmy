@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+.envaliyun-*.local
 
 # Experiment outputs and runtime caches
 result/
@@ -10,10 +11,12 @@ outputs/
 logs/
 .mycode_cache/
 **/tool_cache/
+experiment_rq4/reports/repo-prewarm/
 *.log
 
 # Python environments and caches
 .venv/
+**/.venv.broken-*/
 *.egg-info/
 __pycache__/
 *.py[cod]
@@ -25,3 +28,5 @@ __pycache__/
 .vscode/
 .idea/
 .DS_Store
+*.swp
+*.swo

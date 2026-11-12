@@ -1423,6 +1423,22 @@ def _path_role(path: str) -> str:
     lower = _norm_path(path).lower()
     filename = lower.rsplit("/", 1)[-1]
     first_part = lower.split("/", 1)[0]
+    documentation_stems = (
+        "readme",
+        "changelog",
+        "changes",
+        "contributing",
+        "contributors",
+        "license",
+        "authors",
+        "code_of_conduct",
+        "security",
+    )
+    if any(
+        filename == stem or filename.startswith(stem + ".")
+        for stem in documentation_stems
+    ) or filename.endswith((".md", ".mdx", ".rst", ".adoc")):
+        return "documentation"
     if any(
         lower.endswith(name)
         for name in (
@@ -1515,7 +1531,7 @@ def _source_first_multiplier(path: str, issue_text: str) -> tuple[float, str]:
         return 0.85, f"source_first:issue_allows_non_source:{role}"
     if role == "generated_or_lockfile":
         return _env_float("MYCODE_GENERATED_PATH_MULTIPLIER", 0.06, minimum=0.0), "source_first:generated_or_lockfile_downweight"
-    if role in {"reproduction_or_example", "test_or_fixture"}:
+    if role in {"documentation", "reproduction_or_example", "test_or_fixture"}:
         return _env_float("MYCODE_NOISE_PATH_MULTIPLIER", 0.18, minimum=0.0), f"source_first:noise_path_downweight:{role}"
     return 1.0, "source_first:neutral"
 
@@ -1537,7 +1553,7 @@ def _source_first_score_cap(path: str, issue_text: str) -> tuple[float | None, s
         if any(token in lower_issue for token in ("addon", "addons", "p5.dom", "p5.sound", "sound", "dom library")):
             return None, "source_first:addon_cap_disabled_by_issue"
         return _env_float("MYCODE_ADDON_BUNDLE_SCORE_CAP", 450.0, minimum=0.0), "source_first:addon_bundle_score_cap"
-    if role in {"reproduction_or_example", "test_or_fixture"} and not _issue_allows_non_source_targets(issue_text):
+    if role in {"documentation", "reproduction_or_example", "test_or_fixture"} and not _issue_allows_non_source_targets(issue_text):
         return _env_float("MYCODE_NOISE_PATH_SCORE_CAP", 900.0, minimum=0.0), f"source_first:noise_score_cap:{role}"
     return None, "source_first:no_score_cap"
 
@@ -5524,6 +5540,7 @@ def _rank_entities(
 
 
 _CLOSURE_BLOCKED_ROLES = {
+    "documentation",
     "reproduction_or_example",
     "test_or_fixture",
     "generated_or_lockfile",

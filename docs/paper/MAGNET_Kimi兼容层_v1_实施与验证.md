@@ -73,12 +73,34 @@ Omni/SWE 启动脚本会在加载模型环境后解析协议，并显示协议�
 聚焦回归测试：
 
 ```text
-74 passed
+75 passed
 ```
 
 覆盖内容包括：协议推断、显式覆盖、非法协议拒绝、启动器配置、候选完整复核、未选候选反证、无机制时拒绝闭包，以及有落地机制时允许正常完成闭包。
 
 Python 编译、Shell 语法、`git diff --check` 和凭据模式扫描均通过。此前完整测试运行结果为 `175 passed, 1 skipped, 19 failed`；19 个失败来自本机缺少 clean15 数据路径、Pillow 和真实 API 凭据，不是本次相关测试回归。
+
+### 5.1 第一条在线困难样本金丝雀
+
+使用新的 Kimi2.6 套餐运行历史困难样本 `tailwindlabs__tailwindcss-10276`。旧轨迹记录约 228,896 token、262.5 秒，File Top1 命中但 Function Top15 未命中，closure 为 incomplete。
+
+v1 首次运行结果：
+
+| 项目 | 旧轨迹 | v1 首次运行 |
+| --- | ---: | ---: |
+| Token | 228,896 | 23,870 |
+| 耗时 | 262.5 秒 | 156.7 秒 |
+| LLM 事件 | 未统一记录 | 12 |
+| File Acc@1 | 命中 | 命中 |
+| File Recall@15 | 未按本表口径记录 | 0.50 |
+| Function 首次命中 | Top15 未命中 | Rank 11 |
+| Function Recall@15 | 未按本表口径记录 | 0.25 |
+| Closure | incomplete | partial |
+| Verified mechanism | false | false |
+
+相对旧轨迹，token 减少约 89.6%，耗时减少约 40.3%。正确主文件 `src/lib/setupContextUtils.js` 仍保持 Top1，函数从 Top15 完全未命中改善到 Rank 11 弱命中；但第二个 gold 文件 `src/corePlugins.js` 仍未召回，严格文件和函数指标仍为 0。因此当前证据支持“成本和停止校准明显改善、细粒度定位有有限改善”，不支持“该困难样本已解决”。
+
+该运行还发现 partial fallback 曾把 `CHANGELOG.md` 加入修复集合。后续修复将顶层 README、CHANGELOG、CONTRIBUTING、LICENSE 和常见 Markdown/reStructuredText 文档识别为 `documentation`，并在非文档任务中禁止进入 modification closure。该限制不删除 Top15 评测候选，只清理下游修复上下文；专门回归测试已覆盖此案例。
 
 ## 6. 在线验证计划
 
@@ -113,4 +135,4 @@ Python 编译、Shell 语法、`git diff --check` 和凭据模式扫描均通过
 
 ## 7. 当前结论
 
-v1 已完成离线实现和回归验证，但尚未调用付费 Kimi API，因此现在能确认的是“兼容协议实现正确且不改变其他模型默认行为”，还不能声称 Omni296 指标已经提升。下一项有证据价值的工作是 12 条独立金丝雀，而不是直接覆盖旧结果或全量重跑。
+v1 已完成离线实现、回归验证和一条在线困难样本金丝雀。当前可以确认协议显著降低了该样本的 token 与运行时间，并保留了正确主文件，函数级从完全未命中改善为较低排名命中；同时仍存在多文件完整召回和根机制验证不足。单条样本不足以推断 Omni296 总体指标，下一项有证据价值的工作仍是完成分层的 12 条独立金丝雀，而不是覆盖旧结果或直接全量重跑。

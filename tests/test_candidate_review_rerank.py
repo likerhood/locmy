@@ -304,6 +304,62 @@ def test_kimi_closure_accepts_grounded_verified_mechanism(
     assert "verified_root_patch_mechanism" not in closure["coverage"]["missing_required"]
 
 
+def test_partial_closure_excludes_top_level_documentation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    class StyleSketch(_Sketch):
+        flow_obligations = [
+            {
+                "flow_type": "style_pipeline_flow",
+                "state": "component registration",
+                "behavior": "generated selectors",
+                "required_relation": "DATA",
+                "reason": "Trace component registration into generated selectors.",
+            }
+        ]
+
+    monkeypatch.setenv("MYCODE_MODEL_PROFILE", "kimi")
+    source_path = "src/setup.js"
+    documentation_path = "CHANGELOG.md"
+    (tmp_path / "src").mkdir()
+    (tmp_path / source_path).write_text("export function setup() { return components; }\n")
+    (tmp_path / documentation_path).write_text("# Changes\nComponent registration notes.\n")
+    index = RepositoryIndex(repo="example/repo", instance_id="docs-filter", repo_root=tmp_path)
+
+    closure = _build_modification_closure(
+        ranked=[
+            RankedLocation(
+                path=source_path,
+                score=100.0,
+                score_components={"flow_score": 8.0},
+            ),
+            RankedLocation(
+                path=documentation_path,
+                score=90.0,
+                score_components={"flow_score": 8.0},
+            ),
+        ],
+        verifier={"llm_candidate_review": {"candidates": []}},
+        graph=TypedRepositoryGraph(index),
+        issue_sketch=StyleSketch(),
+        code_contexts=[
+            {"path": source_path, "snippets": [{"text": "return components"}]},
+            {"path": documentation_path, "snippets": [{"text": "Component registration notes"}]},
+        ],
+        flow_traces=[
+            {
+                "flow_type": "style_pipeline_flow",
+                "term": "generated selectors",
+                "candidate_target_paths": [source_path, documentation_path],
+            }
+        ],
+    )
+
+    assert _path_role(documentation_path) == "documentation"
+    assert documentation_path not in closure["files"]
+    assert closure["files"] == [source_path]
+
+
 def test_candidate_review_rejects_compact_head_with_unknown_flow_id() -> None:
     review = review_candidates(
         llm=lambda _prompt: (

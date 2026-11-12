@@ -102,6 +102,43 @@ v1 首次运行结果：
 
 该运行还发现 partial fallback 曾把 `CHANGELOG.md` 加入修复集合。后续修复将顶层 README、CHANGELOG、CONTRIBUTING、LICENSE 和常见 Markdown/reStructuredText 文档识别为 `documentation`，并在非文档任务中禁止进入 modification closure。该限制不删除 Top15 评测候选，只清理下游修复上下文；专门回归测试已覆盖此案例。
 
+同一样本在 documentation 修复后复测：
+
+| 项目 | v1 首次运行 | documentation 修复后 |
+| --- | ---: | ---: |
+| Token | 23,870 | 23,548 |
+| 耗时 | 156.7 秒 | 157.0 秒 |
+| LLM 事件 | 12 | 11 |
+| File Acc@1 | 1.00 | 1.00 |
+| File Recall@15 | 0.50 | 1.00 |
+| File Strict Acc@15 | 0.00 | 1.00 |
+| Function Acc@15 | 1.00 | 1.00 |
+| Function Recall@15 | 0.25 | 0.25 |
+| Function MRR | 0.0909 | 0.0714 |
+| Closure 文件 | `CHANGELOG.md`, `setupContextUtils.js` | `offsets.js`, `setupContextUtils.js` |
+
+复测中两个 gold 文件 `src/lib/setupContextUtils.js` 和 `src/corePlugins.js` 分别位于 Rank 1 和 Rank 3，说明文件完整召回可以在相同低 token 预算下实现。`CHANGELOG.md` 已退出 closure，验证了过滤修复；但 `offsets.js` 仍不是 gold，说明下一层问题是相关源码之间的职责选择，而不再只是文档噪声。两次函数弱命中的具体排名存在波动，因此不能用单次最优结果代表总体水平。
+
+### 5.2 第二条形式闭环假阳性金丝雀
+
+`python__mypy-15407` 的旧轨迹把 closure 标为 complete，但 Function Top15 未命中。v1 运行结果如下：
+
+| 项目 | v1 |
+| --- | ---: |
+| Token | 35,318 |
+| 耗时 | 485.2 秒 |
+| LLM 事件 | 10 |
+| File Acc@1 | 0.00 |
+| File Recall@15 | 0.50 |
+| Function Acc@15 | 1.00 |
+| Function Recall@15 | 0.3333 |
+| Function MRR | 0.1111 |
+| Closure | partial |
+| Profile guard | failed as intended |
+| Missing obligations | `root_patch_mechanism`, `verified_root_patch_mechanism` |
+
+新 guard 没有重演旧轨迹的 false complete，并把缺失机制显式保留下来。函数层由旧记录的 Top15 未命中改善为弱命中，但两个 gold 文件仍只召回一个，Top1 也不是 gold，因此该样本同样不能视为定位成功。约 8 分钟耗时主要来自 mypy 大仓库上的本地 statement flow 和 static slice，而不是 API 重试或限流。
+
 ## 6. 在线验证计划
 
 ### 阶段 A：12 条独立金丝雀
@@ -135,4 +172,4 @@ v1 首次运行结果：
 
 ## 7. 当前结论
 
-v1 已完成离线实现、回归验证和一条在线困难样本金丝雀。当前可以确认协议显著降低了该样本的 token 与运行时间，并保留了正确主文件，函数级从完全未命中改善为较低排名命中；同时仍存在多文件完整召回和根机制验证不足。单条样本不足以推断 Omni296 总体指标，下一项有证据价值的工作仍是完成分层的 12 条独立金丝雀，而不是覆盖旧结果或直接全量重跑。
+v1 已完成离线实现、回归验证、Tailwind 一条重复运行和 mypy 一条在线困难金丝雀。当前证据支持三点：第一，候选/轮次压缩可以显著降低 Tailwind 案例的 token；第二，verified mechanism guard 能阻止旧式 false complete；第三，两类旧 Function Top15 失败都变成了较低排名弱命中。与此同时，多文件完整召回、函数 Top1/5 和 partial fallback 的真实职责选择仍不稳定。两条困难样本不足以推断 Omni296 总体指标，下一项有证据价值的工作仍是完成分层的 12 条独立金丝雀，而不是覆盖旧结果或直接全量重跑。

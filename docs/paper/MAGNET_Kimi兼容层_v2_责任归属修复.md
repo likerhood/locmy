@@ -46,6 +46,10 @@ verified mechanism，即使二者相隔数千行。Kimi profile 因此增加
 `require_entity_snippet_alignment`：snippet 必须包含实体名，或与实体源码行范围重叠。
 不同代码区域的证据不能再拼接成 verified owner。
 
+复跑又发现 class/module 的源码范围过宽，类内任意方法都可能与 class entity 行范围重叠。
+最终规则仅允许 function/method 使用行范围重叠；class/module 必须在 snippet 中直接出现名称，
+避免宽泛容器实体冒充精确编辑位置。
+
 ### 3.2 严格 partial fallback
 
 Kimi profile 开启 `strict_partial_owner_evidence`。旧 seed 不再因为“之前被选中过”而自动
@@ -73,7 +77,7 @@ MiMo 的该参数为 0，因此原排序保持不变。
 聚焦测试结果：
 
 ```text
-64 passed
+65 passed
 ```
 
 覆盖：
@@ -82,6 +86,7 @@ MiMo 的该参数为 0，因此原排序保持不变。
 - 两个竞争 verified head 会阻止停止；
 - 一个 verified owner 加导航候选可以完成对比；
 - 同文件但不同代码区域的 snippet/entity 不能形成 verified mechanism；
+- 宽泛 class 范围不能替代精确函数 owner 证据；
 - Kimi 丢弃无 grounded owner 证据的旧 seed；
 - default 仍保留原 fallback 行为；
 - Kimi 的 verified 精确函数超过语义 sibling；
@@ -105,7 +110,15 @@ mypy 首次 v2：耗时从 485.2 秒降到 282.2 秒，token 从 35,318 降到 2
 但 File Recall@15 从 0.5 降为 0。轨迹显示 Kimi 把 `checker.py` 第 909 行附近的
 snippet 与约第 6233 行的 `lookup_typeinfo` entity 拼接为 verified mechanism，随后唯一
 owner 和 closure promotion 放大了该误判。这个负结果直接促成上述 snippet/entity 对齐
-校验；修复后必须复跑 mypy 才能判断回归是否解除。
+校验。
+
+对齐修复后复跑 mypy：`checker.py + lookup_typeinfo` 的错位证据已被正确降级，第一轮
+`continue_search=true`，不再提前停止。但 Kimi 随后使用覆盖整个类的
+`ExpressionChecker` entity 和类内无关片段，把 `checkexpr.py` 误判为 verified owner；
+File Recall@15 仍为 0，且由于本地深层 flow 被执行两次，总耗时增至 695.7 秒。
+该结果促成 class/module 精确名称限制。它说明 v2 已能逐层阻止虚假证据闭环，但本样本的
+真正 gold `build.py`、`messages.py` 仍未进入候选前 15，根因已经转为上游召回不足，不能
+再靠 owner rerank 修复。
 
 ## 6. 下一步在线验证
 

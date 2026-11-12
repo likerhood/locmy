@@ -392,6 +392,7 @@ def _validate(
         selected_entity = entities_by_path.get(path, {}).get(entity_id) if compact_schema else None
         snippet_text = str((selected_snippet or {}).get("text") or "")
         entity_name = str((selected_entity or {}).get("name") or "")
+        entity_kind = str((selected_entity or {}).get("kind") or "").lower()
         snippet_start = (selected_snippet or {}).get("start_line")
         snippet_end = (selected_snippet or {}).get("end_line")
         entity_start = (selected_entity or {}).get("start_line")
@@ -405,8 +406,8 @@ def _validate(
             selected_snippet
             and selected_entity
             and (
-                ranges_overlap
-                or (entity_name and entity_name.lower() in snippet_text.lower())
+                (entity_name and entity_name.lower() in snippet_text.lower())
+                or (entity_kind in {"function", "method"} and ranges_overlap)
             )
         )
         entities = []

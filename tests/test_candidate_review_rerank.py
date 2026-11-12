@@ -197,6 +197,63 @@ def test_kimi_rejects_verified_owner_with_misaligned_snippet_and_entity() -> Non
     assert review["stop_ready"] is False
 
 
+def test_kimi_does_not_use_broad_class_range_as_precise_owner_evidence() -> None:
+    review = review_candidates(
+        llm=lambda _prompt: json.dumps(
+            {
+                "selected_head": "src/checker.py",
+                "reviews": [
+                    {
+                        "path": "src/checker.py",
+                        "verdict": "verified",
+                        "confidence": 0.9,
+                        "snippet_id": "C1S1",
+                        "entity_id": "C1E1",
+                        "flow_id": "F1",
+                        "causal_chain": "a method in the checker triggers the failure",
+                        "counterevidence": "",
+                        "rejection_code": "none",
+                    }
+                ],
+                "continue_search": False,
+                "missing_evidence": [],
+                "next_queries": [],
+            }
+        ),
+        issue_text="checker crashes while processing an expression",
+        issue_sketch=_Sketch(),
+        ranked=[RankedLocation(path="src/checker.py", score=100.0)],
+        code_contexts=[
+            {
+                "path": "src/checker.py",
+                "entities": [
+                    {
+                        "kind": "class",
+                        "name": "ExpressionChecker",
+                        "start_line": 10,
+                        "end_line": 500,
+                    }
+                ],
+                "snippets": [
+                    {
+                        "start_line": 200,
+                        "end_line": 210,
+                        "text": "def unrelated_method(self): return None",
+                    }
+                ],
+            }
+        ],
+        flow_traces=[{"candidate_target_paths": ["src/checker.py"], "flow_type": "dataflow"}],
+        round_no=1,
+        model_profile=active_model_profile({"MYCODE_MODEL_PROFILE": "kimi"}),
+    )
+
+    candidate = review["candidates"][0]
+    assert candidate["entity_snippet_aligned"] is False
+    assert candidate["mechanism_verified"] is False
+    assert review["continue_search"] is True
+
+
 def test_candidate_review_recovers_complete_candidate_from_truncated_json() -> None:
     ranked = [
         RankedLocation(path="src/io/files.js", score=90.0, reasons=["entity:loadStrings"]),

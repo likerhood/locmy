@@ -34,6 +34,7 @@ from mycode.evidence.issue_sketch import build_issue_sketch, semantic_issue_text
 from mycode.repo_index.typed_graph import TypedRepositoryGraph
 from mycode.repo_index.structure_index import CodeEntity, RepositoryIndex, SearchHit, tokenize
 from mycode.schemas.evidence import NormalizedSample
+from mycode.utils.model_profile import active_model_profile, profile_int
 from mycode.utils.phase_logger import phase_context, phase_event
 
 
@@ -3513,7 +3514,12 @@ def _stop_decision(
             }
     if round_no >= max_rounds:
         return {"stop": True, "reason": "max_rounds_reached", "top_paths": current_top, "confidence": confidence}
-    plateau_limit = _env_int("MYCODE_EVIDENCE_PLATEAU_ROUNDS", 2, minimum=1)
+    plateau_limit = profile_int(
+        "MYCODE_EVIDENCE_PLATEAU_ROUNDS",
+        "evidence_plateau_rounds",
+        2,
+        minimum=1,
+    )
     review_override_round = _env_int(
         "MYCODE_PLATEAU_REVIEW_OVERRIDE_ROUND",
         max(8, max_rounds - 2),
@@ -4761,7 +4767,12 @@ def _run_search_round(
                 code_contexts=code_contexts,
                 flow_traces=flow_traces,
                 round_no=round_no,
-                candidate_limit=_env_int("MYCODE_LLM_REVIEW_CANDIDATES", 6, minimum=3),
+                candidate_limit=profile_int(
+                    "MYCODE_LLM_REVIEW_CANDIDATES",
+                    "candidate_review_limit",
+                    6,
+                    minimum=3,
+                ),
                 repair_attempts=_env_int("MYCODE_LLM_REVIEW_REPAIR_ATTEMPTS", 1, minimum=0),
             )
             phase_event(
@@ -6264,9 +6275,16 @@ def _build_modification_closure(
     required issue/flow obligation?
     """
 
-    limit = _env_int("MYCODE_FINAL_PATCH_SET_LIMIT", 6, minimum=1)
-    max_rounds = _env_int("MYCODE_CLOSURE_MAX_ROUNDS", 3, minimum=1)
-    expand_per_round = _env_int("MYCODE_CLOSURE_EXPAND_PER_ROUND", 2, minimum=1)
+    profile = active_model_profile()
+    limit = profile_int(
+        "MYCODE_FINAL_PATCH_SET_LIMIT", "final_patch_set_limit", 6, minimum=1
+    )
+    max_rounds = profile_int(
+        "MYCODE_CLOSURE_MAX_ROUNDS", "closure_max_rounds", 3, minimum=1
+    )
+    expand_per_round = profile_int(
+        "MYCODE_CLOSURE_EXPAND_PER_ROUND", "closure_expand_per_round", 2, minimum=1
+    )
     if not ranked:
         return {
             "strategy": "iterative_minimal_sufficient_modification_closure",
@@ -6373,11 +6391,37 @@ def _build_modification_closure(
         reason = "read_source_with_flow_evidence" if deterministic else "tentative_top_ranked_source_candidate"
         add(str(primary["path"]), role="patch_target", confidence=confidence, reason=reason)
 
+    def apply_profile_guard(
+        coverage: dict[str, Any], paths: Iterable[str]
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        verified_paths = [
+            path
+            for path in paths
+            if evidence.get(path, {}).get("mechanism_verified")
+            and evidence.get(path, {}).get("grounded")
+        ]
+        required = profile.require_verified_mechanism_for_complete
+        passed = bool(verified_paths) or not required
+        guarded = dict(coverage)
+        missing = list(guarded.get("missing_required") or [])
+        if not passed and "verified_root_patch_mechanism" not in missing:
+            missing.append("verified_root_patch_mechanism")
+        guarded["missing_required"] = missing
+        guarded["complete"] = bool(guarded.get("complete")) and passed
+        return guarded, {
+            "profile": profile.name,
+            "verified_mechanism_required": required,
+            "verified_mechanism_paths": verified_paths,
+            "passed": passed,
+        }
+
     rounds_run = 0
     for round_no in range(1, max_rounds + 1):
         rounds_run = round_no
         selected_before = list(selected)
-        coverage_before = _closure_obligation_coverage(selected, obligations, evidence)
+        coverage_before, _round_guard = apply_profile_guard(
+            _closure_obligation_coverage(selected, obligations, evidence), selected
+        )
         missing = set(coverage_before.get("missing_required") or [])
         expansion_rows: list[dict[str, Any]] = []
 
@@ -6388,8 +6432,15 @@ def _build_modification_closure(
                     continue
                 item = evidence[path]
                 gain: list[str] = []
-                singleton_coverage = _closure_obligation_coverage([path], obligations, evidence)
+                singleton_coverage, singleton_guard = apply_profile_guard(
+                    _closure_obligation_coverage([path], obligations, evidence), [path]
+                )
                 gain = sorted(missing & set(singleton_coverage.get("covered_by", {})))
+                if (
+                    "verified_root_patch_mechanism" in missing
+                    and singleton_guard.get("passed")
+                ):
+                    gain.append("verified_root_patch_mechanism")
                 links = _closure_graph_links(graph, selected, path)
                 reasons: list[str] = []
                 score = len(gain) * 5.0
@@ -6438,8 +6489,12 @@ def _build_modification_closure(
             if len(selected) <= 1:
                 break
             without = [candidate for candidate in selected if candidate != path]
-            with_coverage = _closure_obligation_coverage(selected, obligations, evidence)
-            without_coverage = _closure_obligation_coverage(without, obligations, evidence)
+            with_coverage, _ = apply_profile_guard(
+                _closure_obligation_coverage(selected, obligations, evidence), selected
+            )
+            without_coverage, _ = apply_profile_guard(
+                _closure_obligation_coverage(without, obligations, evidence), without
+            )
             if set(without_coverage.get("missing_required") or []) == set(with_coverage.get("missing_required") or []):
                 removed = selected.pop(path)
                 pruned.append(
@@ -6450,7 +6505,9 @@ def _build_modification_closure(
                     }
                 )
 
-        coverage_after = _closure_obligation_coverage(selected, obligations, evidence)
+        coverage_after, _ = apply_profile_guard(
+            _closure_obligation_coverage(selected, obligations, evidence), selected
+        )
         if coverage_after.get("complete"):
             decision = "complete_minimal_set"
         elif not expansion_rows:
@@ -6474,7 +6531,9 @@ def _build_modification_closure(
         if coverage_after.get("complete") or not expansion_rows:
             break
 
-    final_coverage = _closure_obligation_coverage(selected, obligations, evidence)
+    final_coverage, profile_guard = apply_profile_guard(
+        _closure_obligation_coverage(selected, obligations, evidence), selected
+    )
     partial_fallback: dict[str, Any] = {"applied": False, "reason": "closure_complete"}
     if not final_coverage.get("complete") and _env_bool("MYCODE_PARTIAL_SET_FALLBACK", True):
         fallback_rows, fallback_diagnostics = _partial_closure_fallback(
@@ -6495,7 +6554,9 @@ def _build_modification_closure(
         }
         if fallback_changed:
             selected = {item["path"]: item for item in fallback_rows}
-            final_coverage = _closure_obligation_coverage(selected, obligations, evidence)
+            final_coverage, profile_guard = apply_profile_guard(
+                _closure_obligation_coverage(selected, obligations, evidence), selected
+            )
             trace.append(
                 {
                     "round": rounds_run + 1,
@@ -6552,6 +6613,8 @@ def _build_modification_closure(
     )
     return {
         "strategy": "iterative_minimal_sufficient_modification_closure",
+        "model_profile": profile.name,
+        "profile_guard": profile_guard,
         "status": status,
         "complete": bool(final_coverage.get("complete")),
         "limit": limit,

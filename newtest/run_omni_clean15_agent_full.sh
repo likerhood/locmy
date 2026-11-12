@@ -13,6 +13,7 @@ fi
 
 ENV_FILE="${ENV_FILE:-}"
 load_required_model_environment "$0"
+resolve_magnet_protocol_profile
 
 MODEL_LABEL="${MODEL_NAME:-${MODEL_API_NAME:-llm-agent}}"
 MODEL_LABEL="$(printf '%s' "$MODEL_LABEL" | sed 's/[^A-Za-z0-9_.-]/_/g')"
@@ -143,6 +144,7 @@ echo "Root: $ROOT"
 echo "Samples: $SAMPLES"
 echo "Output: $OUTPUT_DIR"
 echo "Model profile: $ENV_FILE"
+echo "MAGNET protocol profile: $MYCODE_MODEL_PROFILE"
 echo "Model label: $MODEL_LABEL"
 echo "Model API name: ${MODEL_API_NAME:-${MODEL_NAME:-<unset>}}"
 echo "Stage models: planning=${PLANNING_MODEL_API_NAME:-<global>} evidence=${EVIDENCE_MODEL_API_NAME:-<global>} controller=${CONTROLLER_MODEL_API_NAME:-<global>} vlm=${VLM_MODEL_API_NAME:-<global>}"

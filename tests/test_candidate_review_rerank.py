@@ -172,6 +172,138 @@ def test_candidate_review_uses_compact_evidence_ids_and_stage_token_budget(monke
     assert review["continue_search"] is False
 
 
+def test_kimi_review_requires_counterevidence_for_non_selected_candidates(monkeypatch) -> None:
+    monkeypatch.setenv("MYCODE_MODEL_PROFILE", "kimi")
+
+    def fake_llm(_prompt: str, *, max_tokens: int):
+        assert max_tokens == 1400
+        return {
+            "content": (
+                '{"selected_head":"src/parser.js","reviews":['
+                '{"path":"src/parser.js","verdict":"verified","confidence":0.93,'
+                '"snippet_id":"C1S1","entity_id":"C1E1","flow_id":"F1",'
+                '"causal_chain":"tokenize drops empty input before parser output",'
+                '"counterevidence":"","rejection_code":"none"},'
+                '{"path":"src/wrapper.js","verdict":"reject","confidence":0.2,'
+                '"snippet_id":"C2S1","entity_id":"C2E1","flow_id":null,'
+                '"causal_chain":"wrapper only forwards the input",'
+                '"counterevidence":"","rejection_code":"none"}],'
+                '"continue_search":false,"missing_evidence":[],"next_queries":[]}'
+            )
+        }
+
+    review = review_candidates(
+        llm=fake_llm,
+        issue_text="The tokenizer must preserve empty input.",
+        issue_sketch=_Sketch(),
+        ranked=[
+            RankedLocation(path="src/parser.js", score=90.0),
+            RankedLocation(path="src/wrapper.js", score=80.0),
+        ],
+        code_contexts=[
+            {
+                "path": "src/parser.js",
+                "entities": [{"kind": "function", "name": "tokenize"}],
+                "snippets": [{"text": "return input.filter(Boolean);"}],
+            },
+            {
+                "path": "src/wrapper.js",
+                "entities": [{"kind": "function", "name": "forward"}],
+                "snippets": [{"text": "return tokenize(input);"}],
+            },
+        ],
+        flow_traces=[
+            {"flow_type": "parser_flow", "candidate_target_paths": ["src/parser.js"]}
+        ],
+        round_no=1,
+        candidate_limit=4,
+    )
+
+    assert review["model_profile"] == "kimi"
+    assert review["selected_head"] == "src/parser.js"
+    assert review["counterevidence_complete"] is False
+    assert review["continue_search"] is True
+    assert review["stop_ready"] is False
+
+
+def test_kimi_closure_rejects_formal_coverage_without_verified_mechanism(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MYCODE_MODEL_PROFILE", "kimi")
+    path = "src/handler.py"
+    (tmp_path / "src").mkdir()
+    (tmp_path / path).write_text("def handle(value):\n    return value\n")
+    index = RepositoryIndex(repo="example/repo", instance_id="kimi-guard", repo_root=tmp_path)
+    graph = TypedRepositoryGraph(index)
+
+    closure = _build_modification_closure(
+        ranked=[RankedLocation(path=path, score=100.0)],
+        verifier={"llm_candidate_review": {"candidates": []}},
+        graph=graph,
+        issue_sketch=_Sketch(),
+        code_contexts=[{"path": path, "snippets": [{"text": "return value"}]}],
+        flow_traces=[{"flow_type": "state_flow", "candidate_target_paths": [path]}],
+    )
+
+    assert closure["model_profile"] == "kimi"
+    assert closure["complete"] is False
+    assert closure["profile_guard"]["passed"] is False
+    assert "verified_root_patch_mechanism" in closure["coverage"]["missing_required"]
+
+
+def test_kimi_closure_accepts_grounded_verified_mechanism(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("MYCODE_MODEL_PROFILE", "kimi")
+    path = "src/handler.py"
+    (tmp_path / "src").mkdir()
+    (tmp_path / path).write_text(
+        "def handle(values):\n    return [value for value in values if value]\n"
+    )
+    index = RepositoryIndex(repo="example/repo", instance_id="kimi-verified", repo_root=tmp_path)
+    graph = TypedRepositoryGraph(index)
+
+    closure = _build_modification_closure(
+        ranked=[RankedLocation(path=path, score=100.0)],
+        verifier={
+            "llm_candidate_review": {
+                "candidates": [
+                    {
+                        "path": path,
+                        "role": "patch_target",
+                        "confidence": 0.95,
+                        "grounded": True,
+                        "quote_supported": True,
+                        "entity_supported": True,
+                        "mechanism_verified": True,
+                        "patch_mechanism": "The truthiness filter removes empty values.",
+                        "matched_issue_axes": ["concern", "flow"],
+                        "counterevidence": [],
+                    }
+                ]
+            }
+        },
+        graph=graph,
+        issue_sketch=_Sketch(),
+        code_contexts=[
+            {
+                "path": path,
+                "entities": [{"kind": "function", "name": "handle"}],
+                "snippets": [{"text": "return [value for value in values if value]"}],
+            }
+        ],
+        flow_traces=[{"flow_type": "state_flow", "candidate_target_paths": [path]}],
+    )
+
+    assert closure["model_profile"] == "kimi"
+    assert closure["complete"] is True
+    assert closure["status"] == "complete"
+    assert closure["files"] == [path]
+    assert closure["profile_guard"]["passed"] is True
+    assert closure["profile_guard"]["verified_mechanism_paths"] == [path]
+    assert "verified_root_patch_mechanism" not in closure["coverage"]["missing_required"]
+
+
 def test_candidate_review_rejects_compact_head_with_unknown_flow_id() -> None:
     review = review_candidates(
         llm=lambda _prompt: (

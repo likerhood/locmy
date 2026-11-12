@@ -118,6 +118,7 @@ load_required_model_environment() {
     MYCODE_LLM_THINKING MYCODE_LLM_TOKEN_FIELD
     MYCODE_LLM_MIN_COMPLETION_TOKENS MYCODE_LLM_RETRIES
     MYCODE_LLM_RETRY_DELAYS MYCODE_VLM_IMAGE_TRANSPORT
+    MYCODE_MODEL_PROFILE
   )
 
   if [[ "${MYCODE_MODEL_ENV_EXPLICIT:-0}" != "1" ]]; then
@@ -170,6 +171,31 @@ load_required_model_environment() {
   export ENV_FILE LOAD_ENV_FILE=1 MYCODE_ACTIVE_ENV_FILE="$ENV_FILE"
 }
 
+resolve_magnet_protocol_profile() {
+  if [[ -z "${MYCODE_MODEL_PROFILE:-}" ]]; then
+    local model_identity="${MODEL_API_NAME:-} ${MODEL_NAME:-} ${CONTROLLER_MODEL_API_NAME:-}"
+    case "${model_identity,,}" in
+      *kimi*) MYCODE_MODEL_PROFILE=kimi ;;
+      *qwen*) MYCODE_MODEL_PROFILE=qwen ;;
+      *mimo*) MYCODE_MODEL_PROFILE=mimo ;;
+      *) MYCODE_MODEL_PROFILE=default ;;
+    esac
+  fi
+  case "$MYCODE_MODEL_PROFILE" in
+    default|qwen|kimi|mimo) ;;
+    *) echo "ERROR: unsupported MYCODE_MODEL_PROFILE=$MYCODE_MODEL_PROFILE" >&2; return 2 ;;
+  esac
+  export MYCODE_MODEL_PROFILE
+  if [[ "$MYCODE_MODEL_PROFILE" == "kimi" ]]; then
+    export MYCODE_LLM_REVIEW_CANDIDATES="${MYCODE_LLM_REVIEW_CANDIDATES:-4}"
+    export MYCODE_CANDIDATE_REVIEW_MAX_TOKENS="${MYCODE_CANDIDATE_REVIEW_MAX_TOKENS:-1400}"
+    export MYCODE_FINAL_PATCH_SET_LIMIT="${MYCODE_FINAL_PATCH_SET_LIMIT:-3}"
+    export MYCODE_CLOSURE_MAX_ROUNDS="${MYCODE_CLOSURE_MAX_ROUNDS:-2}"
+    export MYCODE_CLOSURE_EXPAND_PER_ROUND="${MYCODE_CLOSURE_EXPAND_PER_ROUND:-1}"
+    export MYCODE_EVIDENCE_PLATEAU_ROUNDS="${MYCODE_EVIDENCE_PLATEAU_ROUNDS:-1}"
+  fi
+}
+
 print_resolved_model_config() {
   local env_file="$1"
   local model_label="$2"
@@ -183,4 +209,5 @@ print_resolved_model_config() {
   echo "Controller model: ${CONTROLLER_MODEL_API_NAME:-<global>}"
   echo "VLM model: ${VLM_MODEL_API_NAME:-<global>}"
   echo "VLM image transport: ${MYCODE_VLM_IMAGE_TRANSPORT:-data_uri}"
+  echo "MAGNET protocol profile: ${MYCODE_MODEL_PROFILE:-default}"
 }

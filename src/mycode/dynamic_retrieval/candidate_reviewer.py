@@ -9,6 +9,7 @@ import re
 from typing import Any, Callable, Iterable
 
 from mycode.evidence.tools.json_response import parse_json_response
+from mycode.utils.model_profile import ModelProtocolProfile, active_model_profile, profile_int
 
 
 CandidateReviewLLM = Callable[..., dict[str, Any] | str]
@@ -50,6 +51,16 @@ def _dedupe(values: Iterable[str], *, limit: int = 40) -> list[str]:
         if len(out) >= limit:
             break
     return out
+
+
+def _text_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Iterable):
+        return [str(item) for item in value]
+    return [str(value)]
 
 
 def _response_text(value: dict[str, Any] | str) -> str:
@@ -247,6 +258,7 @@ def _prompt(
     candidates: list[dict[str, Any]],
     flow_evidence: list[dict[str, Any]],
     round_no: int,
+    profile: ModelProtocolProfile,
 ) -> str:
     raw_sketch = issue_sketch.to_dict() if hasattr(issue_sketch, "to_dict") else dict(issue_sketch or {})
     sketch = {
@@ -278,13 +290,21 @@ def _prompt(
     }
     payload = {
         "round_no": round_no,
-        "issue_text": issue_text[:3500],
+        "issue_text": issue_text[: profile.issue_text_limit],
         "issue_sketch": sketch,
         "flow_evidence": flow_evidence,
         "candidates": candidates,
     }
+    profile_rules = ""
+    if profile.require_counterevidence:
+        profile_rules = (
+            "Review every supplied candidate exactly once. For each candidate not selected as the edit owner, "
+            "counterevidence must state one concrete reason it cannot independently explain the failure. "
+            "Do not add candidates or broaden the task. Prefer a verified single owner over several plausible files.\n"
+        )
     return (
         "You are the final edit-responsibility judge for repository issue localization.\n"
+        f"Active decision protocol: {profile.name}.\n"
         "Evaluate at most the supplied candidate files. Identify the file that most directly owns the required "
         "code change, not a file that is merely related, imported, adjacent, or mentioned by a URL.\n"
         "A candidate is verified only when all five conditions hold: it is editable target-repository source; "
@@ -301,11 +321,13 @@ def _prompt(
         "documentation, and external reproduction files cannot be selected unless the issue explicitly targets them.\n"
         "Select at most one new head. Do not rerank the remaining candidates. Set continue_search=true when no "
         "candidate satisfies every verification condition. Keep causal_chain and missing_evidence to one short sentence.\n"
-        "Return compact JSON only with this schema:\n"
+        + profile_rules
+        + "Return compact JSON only with this schema:\n"
         "{\"selected_head\":null,\"reviews\":[{\"path\":\"exact candidate path\","
         "\"verdict\":\"verified|plausible|navigation|reject\",\"confidence\":0.0,"
         "\"snippet_id\":\"C1S1|null\",\"entity_id\":\"C1E1|null\",\"flow_id\":\"F1|null\","
-        "\"causal_chain\":\"one concise sentence\",\"rejection_code\":\"none|no_source|no_entity|no_flow|artifact|navigation_only\"}],"
+        "\"causal_chain\":\"one concise sentence\",\"counterevidence\":\"one concrete exclusion or empty for verified\","
+        "\"rejection_code\":\"none|no_source|no_entity|no_flow|artifact|navigation_only\"}],"
         "\"continue_search\":true,\"missing_evidence\":[\"one concise requirement\"],"
         "\"next_queries\":[\"one specific source or symbol query\"]}.\n\n"
         + json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -322,6 +344,7 @@ def _validate(
     snippets_by_path: dict[str, dict[str, dict[str, Any]]],
     entities_by_path: dict[str, dict[str, dict[str, Any]]],
     flow_paths_by_id: dict[str, set[str]],
+    profile: ModelProtocolProfile,
 ) -> dict[str, Any]:
     compact_schema = isinstance(data.get("reviews"), list)
     raw_candidates = data.get("reviews") if compact_schema else data.get("candidates")
@@ -408,6 +431,15 @@ def _validate(
             and direct_flow_supported
             and patch_mechanism
         )
+        counterevidence = _dedupe(
+            _text_list(item.get("counterevidence"))
+            + (
+                [str(item.get("rejection_code"))]
+                if compact_schema and str(item.get("rejection_code") or "none") != "none"
+                else []
+            ),
+            limit=6,
+        )
         candidates.append(
             {
                 "path": path,
@@ -425,13 +457,11 @@ def _validate(
                 "direct_flow_supported": direct_flow_supported,
                 "mechanism_verified": mechanism_verified,
                 "patch_mechanism": patch_mechanism,
-                "counterevidence": _dedupe(
-                    item.get("counterevidence", []) or (
-                        [str(item.get("rejection_code"))]
-                        if compact_schema and str(item.get("rejection_code") or "none") != "none"
-                        else []
-                    ),
-                    limit=6,
+                "counterevidence": counterevidence,
+                "counterevidence_missing": bool(
+                    profile.require_counterevidence
+                    and verdict != "verified"
+                    and not counterevidence
                 ),
                 "matched_issue_axes": (
                     ["concern", "flow"] if compact_schema and direct_flow_supported else
@@ -468,6 +498,10 @@ def _validate(
     critical_missing = [
         item for item in missing_evidence if any(marker in item.lower() for marker in critical_markers)
     ]
+    review_coverage = len(seen) / max(1, len(allowed_paths))
+    counterevidence_complete = not any(
+        item.get("counterevidence_missing") for item in candidates
+    )
     best_patch = next(
         (item for item in candidates if item["role"] in {"patch_target", "supporting_target"}),
         None,
@@ -482,9 +516,13 @@ def _validate(
         and "concern" in matched_axes
         and matched_axes.intersection({"call", "flow", "program", "behavior"})
         and not critical_missing
+        and (not profile.require_counterevidence or review_coverage == 1.0)
+        and counterevidence_complete
     )
     continue_search = bool(data.get("continue_search", False))
     if not any(item.get("mechanism_verified") for item in candidates) or (compact_schema and selected is None):
+        continue_search = True
+    if profile.require_counterevidence and (review_coverage < 1.0 or not counterevidence_complete):
         continue_search = True
     return {
         "status": "ok",
@@ -496,6 +534,9 @@ def _validate(
         "next_queries": _dedupe(data.get("next_queries", []) or [], limit=12),
         "selected_head": selected["path"] if selected is not None else None,
         "prompt_schema": "evidence_ids_v2" if compact_schema else "legacy_v1",
+        "model_profile": profile.name,
+        "review_coverage": round(review_coverage, 4),
+        "counterevidence_complete": counterevidence_complete,
     }
 
 
@@ -510,7 +551,9 @@ def review_candidates(
     round_no: int,
     candidate_limit: int = 12,
     repair_attempts: int = 1,
+    model_profile: ModelProtocolProfile | None = None,
 ) -> dict[str, Any]:
+    profile = model_profile or active_model_profile()
     flow_traces = list(flow_traces)
     flow_evidence = _flow_packet(flow_traces)
     candidates = _candidate_packet(
@@ -567,9 +610,11 @@ def review_candidates(
         candidates=candidates,
         flow_evidence=flow_evidence,
         round_no=round_no,
+        profile=profile,
     )
     cache_payload = {
         "prompt_schema": "evidence_ids_v2",
+        "model_profile": profile.name,
         "llm_identity": id(llm),
         "issue_text": issue_text,
         "candidates": [
@@ -600,9 +645,11 @@ def review_candidates(
         return result
     attempts: list[dict[str, Any]] = []
     active_prompt = prompt
-    review_max_tokens = max(
-        600,
-        int(os.environ.get("MYCODE_CANDIDATE_REVIEW_MAX_TOKENS", "1200") or 1200),
+    review_max_tokens = profile_int(
+        "MYCODE_CANDIDATE_REVIEW_MAX_TOKENS",
+        "candidate_review_max_tokens",
+        1200,
+        minimum=600,
     )
     for attempt_no in range(1, max(1, repair_attempts + 1) + 1):
         try:
@@ -621,6 +668,7 @@ def review_candidates(
             snippets_by_path=snippets_by_path,
             entities_by_path=entities_by_path,
             flow_paths_by_id=flow_paths_by_id,
+            profile=profile,
         )
         usage = response.get("usage") if isinstance(response, dict) else {}
         attempt = {
@@ -648,7 +696,8 @@ def review_candidates(
             + "\nRequired shape: {\"selected_head\":null,\"reviews\":[{\"path\":\"...\","
             "\"verdict\":\"verified|plausible|navigation|reject\",\"confidence\":0.0,"
             "\"snippet_id\":null,\"entity_id\":null,\"flow_id\":null,"
-            "\"causal_chain\":\"short\",\"rejection_code\":\"no_source\"}],"
+            "\"causal_chain\":\"short\",\"counterevidence\":\"concrete exclusion\","
+            "\"rejection_code\":\"no_source\"}],"
             "\"continue_search\":true,\"missing_evidence\":[],\"next_queries\":[]}."
             " Use only evidence IDs present in the original packet.\nPrevious partial answer:\n"
             + raw_text[:2000]

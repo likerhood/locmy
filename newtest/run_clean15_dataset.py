@@ -25,6 +25,7 @@ from mycode.data.dataset_loader import count_samples, load_samples
 from mycode.evaluation.localization_eval import evaluate_entity_ranking, evaluate_file_ranking
 from mycode.utils.phase_logger import phase_event
 from mycode.utils.env import llm_config_from_env
+from mycode.utils.model_profile import active_model_profile, profile_int
 from mycode.utils.trace_recorder import collect_llm_events, collect_token_usage, compact_agent_trace
 
 
@@ -1337,7 +1338,9 @@ def main() -> None:
     summary["output_dir"] = str(output_dir)
     summary["model_name"] = config.get("model_name")
     summary["model_api_name"] = config.get("model_api_name")
+    model_profile = active_model_profile()
     summary["settings"] = {
+        "model_profile": model_profile.name,
         "top_k": args.top_k,
         "max_samples": args.max_samples,
         "start_index": args.start_index,
@@ -1360,10 +1363,18 @@ def main() -> None:
         "verbose_agent_limit": args.verbose_agent_limit,
         "verbose_llm_text_limit": args.verbose_llm_text_limit,
         "sample_timeout_seconds": args.sample_timeout_seconds,
-        "final_patch_set_limit": int(os.environ.get("MYCODE_FINAL_PATCH_SET_LIMIT", "6") or 6),
-        "closure_max_rounds": int(os.environ.get("MYCODE_CLOSURE_MAX_ROUNDS", "3") or 3),
-        "closure_expand_per_round": int(os.environ.get("MYCODE_CLOSURE_EXPAND_PER_ROUND", "2") or 2),
-        "llm_review_candidates": int(os.environ.get("MYCODE_LLM_REVIEW_CANDIDATES", "6") or 6),
+        "final_patch_set_limit": profile_int(
+            "MYCODE_FINAL_PATCH_SET_LIMIT", "final_patch_set_limit", 6, minimum=1
+        ),
+        "closure_max_rounds": profile_int(
+            "MYCODE_CLOSURE_MAX_ROUNDS", "closure_max_rounds", 3, minimum=1
+        ),
+        "closure_expand_per_round": profile_int(
+            "MYCODE_CLOSURE_EXPAND_PER_ROUND", "closure_expand_per_round", 2, minimum=1
+        ),
+        "llm_review_candidates": profile_int(
+            "MYCODE_LLM_REVIEW_CANDIDATES", "candidate_review_limit", 6, minimum=3
+        ),
         "llm_review_repair_attempts": int(os.environ.get("MYCODE_LLM_REVIEW_REPAIR_ATTEMPTS", "1") or 1),
         "flow_pool_limit": int(os.environ.get("MYCODE_FLOW_POOL_LIMIT", "48") or 48),
         "round_read_budget": int(os.environ.get("MYCODE_ROUND_READ_BUDGET", "24") or 24),

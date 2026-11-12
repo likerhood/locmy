@@ -13,6 +13,7 @@ fi
 
 ENV_FILE="${ENV_FILE:-}"
 load_required_model_environment "$0"
+resolve_magnet_protocol_profile
 
 MODEL_LABEL="${MODEL_NAME:-${MODEL_API_NAME:-llm-agent}}"
 MODEL_LABEL="$(printf '%s' "$MODEL_LABEL" | sed 's/[^A-Za-z0-9_.-]/_/g')"

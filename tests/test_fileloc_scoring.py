@@ -47,6 +47,9 @@ def test_complement_cannot_replace_valid_outcomes_or_mix_code():
     a = {"implementation_hashes": {"a.py": "old"}, "cases": [{"instance_id": "a"}]}
     b = {"implementation_hashes": {"a.py": "old"}, "cases": [{"instance_id": "b"}]}
     assert len(module.merge_complement_manifest(a, b)["cases"]) == 2
+    committed = dict(b, tracked_diff_sha256="empty-after-commit")
+    uncommitted = dict(a, tracked_diff_sha256="pre-commit")
+    assert len(module.merge_complement_manifest(uncommitted, committed)["cases"]) == 2
     assert len(a["cases"]) == 1
     with pytest.raises(ValueError, match="disjoint"):
         module.merge_complement_manifest(a, a)
@@ -67,3 +70,4 @@ def test_explicit_new_release_policy_discloses_other_granularity_regression():
     assert "file/acc@1" in release["gain_metrics"]
     assert "function/acc@1" in release["regressed_metrics"]
     assert not module.experimental_release_assessment(rows, complete=False)["eligible_for_experimental_push"]
+    assert not module.experimental_release_assessment(rows, complete=False)["gain_metrics"]

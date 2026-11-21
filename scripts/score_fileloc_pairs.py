@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import re
 import hashlib
+import subprocess
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from mycode.evaluation.localization_eval import evaluate_three_level_from_gold_sets
@@ -58,6 +59,8 @@ def merge_complement_manifest(primary, complement):
     for key in ["base_commit", "tracked_diff_sha256", "source_hashes", "model", "profile", "top_k",
                 "dynamic_rounds", "max_react_steps", "max_tool_rounds", "task_timeout_seconds",
                 "implementation_hashes", "improved_strategy", "vlm", "full_browser", "function_reread_limit"]:
+        if key == "tracked_diff_sha256" and primary.get("implementation_hashes") and primary["implementation_hashes"] == complement.get("implementation_hashes"):
+            continue
         if primary.get(key) != complement.get(key):
             raise ValueError(f"Complement configuration mismatch: {key}")
     ids = [case["instance_id"] for manifest in [primary, complement] for case in manifest["cases"]]
@@ -69,6 +72,10 @@ def merge_complement_manifest(primary, complement):
 def experimental_release_assessment(rows, *, complete):
     """Explicit new user policy; never overwrite the historical strict gate."""
     gains, regressions = [], []
+    if not complete:
+        return {"policy": "either_granularity_gain_with_disclosed_regressions", "complete": False,
+                "gain_metrics": [], "regressed_metrics": [], "eligible_for_experimental_push": False,
+                "scope": "incomplete pairs are not compared for release"}
     keys = ["acc@1", "acc@3", "acc@5", "acc@8", "acc@15", "set_sl@15", "set_rec@15"]
     for level in ["file", "function"]:
         for key in keys:
@@ -93,6 +100,8 @@ def main():
     parser.add_argument("--complement-run-dir", type=Path, help="Disjoint remaining cases, identical frozen code/model/budgets")
     parser.add_argument("--report-prefix", default="paired")
     parser.add_argument("--release-policy", choices=["legacy-strict", "any-gain-experimental"], default="legacy-strict")
+    parser.add_argument("--summary-output", type=Path, help="New lightweight repository-safe result summary; complete pairs only")
+    parser.add_argument("--code-commit", default="", help="Git commit whose dynamic implementation hashes must match before summary export")
     args = parser.parse_args()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", args.report_prefix):
         parser.error("report prefix must be a simple name")
@@ -107,6 +116,8 @@ def main():
         retry = json.loads((args.retry_run_dir / "manifest.json").read_text())
         for key in ["base_commit", "tracked_diff_sha256", "source_hashes", "model", "profile", "top_k",
                     "dynamic_rounds", "max_react_steps", "max_tool_rounds", "task_timeout_seconds"]:
+            if key == "tracked_diff_sha256" and manifest.get("implementation_hashes") and manifest["implementation_hashes"] == retry.get("implementation_hashes"):
+                continue
             if retry[key] != manifest[key]:
                 raise SystemExit(f"Retry configuration mismatch: {key}")
         for key in ["implementation_hashes", "improved_strategy", "function_reread_limit"]:
@@ -154,9 +165,14 @@ def main():
             target_evidence = [dict(path=item["path"], rank=i,
                                     precision=(item.get("belief") or {}).get("precision_rerank", {}))
                                for i, item in enumerate(loc.get("ranked_locations", []), 1) if item["path"] in gt]
+            joint = (loc.get("best_round_selection") or {}).get("joint_evidence_v2") or {}
+            function_ledger = (joint.get("functions") or {}).get("source_ledger", [])
             rows.append(dict(instance_id=ident, role=case["role"], arm=arm, first_rank=rank,
                              metrics=metrics, predicted_files=predicted, stage_ranks=stages,
                              read_execution=reads, target_evidence=target_evidence,
+                             actual_rounds=len(loc.get("dynamic_rounds", [])),
+                             main_react_steps=len((loc.get("react_agent_trace") or {}).get("steps", [])),
+                             function_source_reads=sum(bool(e.get("source_read")) for e in function_ledger),
                              source_path=str(path), source_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
                              status=result.get("status"), elapsed_seconds=result.get("elapsed_seconds"),
                              token_usage=result.get("token_usage_summary")))
@@ -227,6 +243,32 @@ def main():
               f"本次选择：{args.release_policy}；旧 gate 保留原值。", "", "```json",
               json.dumps(release, ensure_ascii=False, indent=2), "```"]
     (args.run_dir / f"{args.report_prefix}_results.md").write_text("\n".join(lines)+"\n")
+    if args.summary_output:
+        if not gate["complete"] or not args.code_commit:
+            raise SystemExit("Summary export needs complete pairs and --code-commit")
+        repo_root = Path(__file__).resolve().parents[1]
+        commit = subprocess.check_output(["git", "rev-parse", "--verify", args.code_commit + "^{commit}"], cwd=repo_root, text=True).strip()
+        for relative, expected in manifest["implementation_hashes"].items():
+            blob = subprocess.check_output(["git", "show", f"{commit}:{relative}"], cwd=repo_root)
+            if hashlib.sha256(blob).hexdigest() != expected:
+                raise SystemExit(f"Commit does not match frozen source: {relative}")
+        light_rows = []
+        for row in rows:
+            item = {k: row[k] for k in ["instance_id", "role", "arm", "first_rank", "metrics", "source_sha256",
+                    "elapsed_seconds", "token_usage", "actual_rounds", "main_react_steps", "function_source_reads"]}
+            metric_keys = [f"acc@{k}" for k in range(1,16)] + ["gold_count", "pred_count", "mrr@15", "map@15", "set_sl@15", "set_rec@15"]
+            item["metrics"] = {level: {key: row["metrics"][level][key] for key in metric_keys if key in row["metrics"][level]}
+                               for level in ["file", "function"]}
+            item["source_run"] = Path(row["source_path"]).parents[2].name
+            light_rows.append(item)
+        summary = {"algorithm": manifest.get("improved_strategy"), "code_commit": commit,
+                   "model": manifest["model"], "profile": manifest["profile"],
+                   "budget": {k: manifest.get(k) for k in ["top_k", "dynamic_rounds", "max_react_steps", "task_timeout_seconds", "function_reread_limit"]},
+                   "gate": gate, "experimental_release_assessment": release, "paired_aggregate": aggregate,
+                   "rows": light_rows, "implementation_hashes": manifest["implementation_hashes"],
+                   "note": "8 selected development cases, not a full benchmark claim; main_react_steps is not all pipeline actions; token records are not complete billing"}
+        with args.summary_output.open("x") as handle:
+            json.dump(summary, handle, ensure_ascii=False, indent=2)
     print(json.dumps(dict(completed=len(rows), incomplete=incomplete, gate=gate), ensure_ascii=False))
 
 

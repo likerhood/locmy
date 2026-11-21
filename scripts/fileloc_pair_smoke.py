@@ -108,6 +108,10 @@ def main():
         for key in ["base_commit", "cases", "tracked_diff_sha256", "source_hashes", "model", "profile", "top_k",
                     "implementation_hashes", "improved_strategy", "function_reread_limit",
                     "dynamic_rounds", "max_react_steps", "max_tool_rounds", "task_timeout_seconds"]:
+            if key == "tracked_diff_sha256" and old.get("implementation_hashes") and old["implementation_hashes"] == manifest["implementation_hashes"]:
+                # Committing an identical working tree changes git diff, not
+                # the frozen implementation. Preserve the old audit metadata.
+                continue
             if old[key] != manifest[key]:
                 raise SystemExit(f"Frozen manifest mismatch: {key}")
     else:
@@ -143,8 +147,9 @@ def main():
             if output.exists():
                 results_path = output / "localization_results.jsonl"
                 if args.resume and results_path.exists() and results_path.stat().st_size:
+                    from score_fileloc_pairs import valid_result
                     saved = json.loads(results_path.read_text().splitlines()[-1])
-                    if saved.get("status") == "ok" and (saved.get("token_usage_summary") or {}).get("total_tokens"):
+                    if valid_result(saved):
                         print(f"SKIP completed {item['instance_id']} {arm}", flush=True)
                         continue
                 raise RuntimeError(f"Existing incomplete arm; choose new run directory: {output}")

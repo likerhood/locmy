@@ -19,6 +19,7 @@ from mycode.repo_index.structure_index import RepositoryIndex, tokenize
 from mycode.repo_index.typed_graph import TypedRepositoryGraph
 from mycode.schemas.evidence import NormalizedSample
 from mycode.utils.phase_logger import phase_context, phase_event
+from mycode.dynamic_retrieval.source_windows import focused_windows
 
 
 @dataclass
@@ -649,6 +650,8 @@ class ReadCodeTool:
                     )
                     if len(snippets) >= 2:
                         break
+                if _env_bool("MYCODE_JOINT_EVIDENCE_V2"):
+                    snippets = focused_windows(text, queries, limit=2)
                 candidates.append(
                     {
                         "path": path,

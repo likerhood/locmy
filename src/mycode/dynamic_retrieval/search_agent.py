@@ -36,6 +36,7 @@ from mycode.repo_index.structure_index import CodeEntity, RepositoryIndex, Searc
 from mycode.schemas.evidence import NormalizedSample
 from mycode.utils.model_profile import ModelProtocolProfile, active_model_profile, profile_int
 from mycode.utils.phase_logger import phase_context, phase_event
+from mycode.dynamic_retrieval.source_windows import focused_windows
 
 
 @dataclass
@@ -1381,6 +1382,8 @@ def _read_code_context(
                 )
             if len(matched) >= 3:
                 break
+        if _env_bool("MYCODE_JOINT_EVIDENCE_V2", False):
+            matched = focused_windows(text, terms, limit=3)
         contexts.append(
             {
                 "path": item.path,
@@ -3981,6 +3984,27 @@ def _cross_round_candidate_frontier(
     }
 
 
+def _verified_frontier_order(rows: list, margin: float) -> list:
+    """Stable evidence-gated insertions within the existing first fifteen files."""
+    ordered = list(rows[:15])
+    # Process strongest verified owners first; weak candidates retain relative order.
+    eligible = sorted(
+        (row for row in ordered if row[3].get("head_eligible")),
+        key=lambda row: (-row[0], row[1]),
+    )
+    for challenger in eligible:
+        position = next(i for i, row in enumerate(ordered) if row[1] == challenger[1])
+        target = position
+        while target > 0:
+            previous = ordered[target - 1]
+            if challenger[0] <= previous[0] or challenger[0] < previous[0] + margin:
+                break
+            target -= 1
+        if target != position:
+            ordered.insert(target, ordered.pop(position))
+    return ordered + list(rows[15:])
+
+
 def _precision_rerank_locations(
     *,
     ranked: list[RankedLocation],
@@ -4268,6 +4292,11 @@ def _precision_rerank_locations(
     elif incumbent_blocked and fallback_eligible:
         chosen = max(fallback_eligible, key=lambda row: (row[0], -row[1]))
     ordered_rows = [chosen] + [row for row in rows if row[2].path != chosen[2].path]
+    strategy = "verified_head_selector_tail_preserving"
+    if os.environ.get("MYCODE_FILE_FRONT_RERANK", "head_only") == "verified_frontier":
+        ordered_rows = _verified_frontier_order(ordered_rows, margin)
+        chosen = ordered_rows[0]
+        strategy = "verified_frontier"
     reranked = [row[2] for row in ordered_rows]
     changes = [
         {
@@ -4282,7 +4311,7 @@ def _precision_rerank_locations(
     ]
     return reranked, {
         "enabled": True,
-        "strategy": "verified_head_selector_tail_preserving",
+        "strategy": strategy,
         "candidate_count": len(reranked),
         "head_candidate_limit": head_limit,
         "replacement_margin": margin,
@@ -5742,9 +5771,151 @@ def _closure_context_map(code_contexts: Iterable[dict[str, Any]]) -> dict[str, d
         if not path:
             continue
         current = merged.get(path)
+        if current is not None and _env_bool("MYCODE_JOINT_EVIDENCE_V2", False):
+            combined = dict(current)
+            for key in ("snippets", "entities"):
+                values = []
+                seen = set()
+                for value in list(current.get(key, []) or []) + list(item.get(key, []) or []):
+                    identity = repr(sorted(value.items())) if isinstance(value, dict) else repr(value)
+                    if identity not in seen:
+                        seen.add(identity)
+                        values.append(value)
+                combined[key] = values[:12]
+            merged[path] = combined
+            continue
         if current is None or len(item.get("snippets", []) or []) > len(current.get("snippets", []) or []):
             merged[path] = item
     return merged
+
+
+def _reread_function_ledger(index, rankings, issue_text, *, limit=24):
+    """Read bounded actual entity implementations; never use evaluation labels.
+
+    Repetition is not proof of responsibility. A one-round discovery can have
+    independent implementation/issue and flow (or exact-review) support.
+    """
+    candidates = {}
+    for ranking in rankings:
+        for rank, item in enumerate(ranking[:15], 1):
+            entry = candidates.setdefault(item.id, {"item": item, "best_rank": rank, "reasons": set()})
+            entry["best_rank"] = min(entry["best_rank"], rank)
+            entry["reasons"].update(item.reasons)
+    indexed = {(entity_id(e.path, e.kind, e.name), e.start_line, e.end_line): e for e in index.entities}
+    ledger = {}
+    terms = _entity_semantic_atoms(issue_text)
+    ordered = sorted(candidates.items(), key=lambda pair: (pair[1]["best_rank"], pair[0]))
+    for position, (ident, entry) in enumerate(ordered):
+        item = entry["item"]
+        record = {"id": ident, "path": item.path, "best_rank": entry["best_rank"],
+                  "source_read": False, "strong_singleton": False, "matched_issue_terms": [],
+                  "snippets": [], "reason": "read_budget_exhausted"}
+        ledger[ident] = record
+        if position >= max(0, limit):
+            continue
+        entity = indexed.get((ident, item.start_line, item.end_line))
+        lines = index.files.get(item.path, "").splitlines()
+        if entity is None or not (1 <= item.start_line <= item.end_line <= len(lines)):
+            record["reason"] = "missing_or_mismatched_indexed_source_range"
+            continue
+        body = "\n".join(lines[item.start_line - 1:item.end_line])
+        matched = sorted(terms & _entity_semantic_atoms(body))
+        flow = "program_flow_support" in entry["reasons"]
+        exact_review = any(r.startswith("llm_review_exact_entity:patch_target:") for r in entry["reasons"])
+        record.update(source_read=True, start_line=item.start_line, end_line=item.end_line,
+                      matched_issue_terms=matched, flow_supported=flow, exact_review_supported=exact_review)
+        for window in focused_windows(body, [issue_text], limit=2):
+            start = item.start_line + window["start_line"] - 1
+            end = item.start_line + window["end_line"] - 1
+            record["snippets"].append({"start_line": start, "end_line": end,
+                "text": "\n".join(f"{j + 1}: {lines[j]}" for j in range(start - 1, end))})
+        strong = bool(record["snippets"] and len(matched) >= 2 and (flow or exact_review))
+        record.update(strong_singleton=strong,
+                      reason="source_issue_and_flow_or_exact_review" if strong else "source_read_but_insufficient_responsibility_axes")
+    return ledger
+
+
+def _joint_round_consensus(selected, rankings, *, key, contexts, top_k, entity_evidence=None):
+    """Recover recurrent, source-observed candidates without comparing raw scores.
+
+    Files retain the selected checkpoint's extra vote, entities do not inherit
+    a file-quality checkpoint vote. A challenger needs two rounds and source.
+    """
+    selected = list(selected)
+    rankings = [list(ranking) for ranking in rankings]
+    is_entity = any(hasattr(item, "start_line") for item in selected) or any(
+        hasattr(item, "start_line") for ranking in rankings for item in ranking)
+    rank_constant = 3 if is_entity else 10
+    by_key = {key(item): item for item in selected}
+    votes = defaultdict(float)
+    appearances = Counter()
+    original = {key(item): i for i, item in enumerate(selected)}
+    entity_evidence = entity_evidence or {}
+    for ranking in rankings:
+        seen = set()
+        for rank, item in enumerate(ranking[:top_k], 1):
+            ident = key(item)
+            if ident in seen:
+                continue
+            seen.add(ident)
+            appearances[ident] += 1
+            votes[ident] += 1 / (rank_constant + rank)
+            by_key.setdefault(ident, item)
+    if not is_entity:
+        for rank, item in enumerate(selected, 1):
+            votes[key(item)] += 1 / (rank_constant + rank)
+
+    def observed(item):
+        if entity_evidence.get(key(item), {}).get("source_read"):
+            return True
+        snippets = contexts.get(item.path, {}).get("snippets", []) or []
+        if hasattr(item, "start_line"):
+            return any(s.get("start_line", 0) <= item.end_line and
+                       s.get("end_line", 0) >= max(1, item.start_line) for s in snippets)
+        return bool(snippets)
+
+    eligible = [item for ident, item in by_key.items()
+                if ident in original or (appearances[ident] >= 2 and observed(item))
+                or (is_entity and entity_evidence.get(ident, {}).get("strong_singleton"))]
+    def precision(item):
+        return (getattr(item, "belief", {}) or {}).get("precision_rerank", {}) or {}
+
+    def contradicted(item):
+        return bool(precision(item).get("counterevidence_grounded"))
+
+    # Do not let repeated exploratory visits reverse a verified responsibility
+    # decision. This is a file-evidence constraint, not an oracle/gold lock.
+    pinned = [item for item in selected[:3] if not is_entity and
+              precision(item).get("head_eligible") and precision(item).get("grounded") and
+              precision(item).get("mechanism_verified") and not contradicted(item)]
+    pinned_keys = {key(item) for item in pinned}
+    remainder = sorted((i for i in eligible if key(i) not in pinned_keys), key=lambda item:
+        (contradicted(item), -votes[key(item)], original.get(key(item), top_k), key(item)))
+    result = (pinned + remainder)[:top_k]
+    reserved = []
+    if is_entity and entity_evidence:
+        # A small tail reservoir preserves well-grounded transient discoveries,
+        # without overriding the head or blindly unioning every round's output.
+        strong = [i for i in eligible if entity_evidence.get(key(i), {}).get("strong_singleton")]
+        strong.sort(key=lambda i: (entity_evidence[key(i)]["best_rank"], -votes[key(i)], key(i)))
+        for item in strong:
+            if len(reserved) >= min(4, top_k) or any(key(i) == key(item) for i in result):
+                continue
+            victims = [j for j in range(len(result) - 1, min(3, top_k) - 1, -1)
+                       if not entity_evidence.get(key(result[j]), {}).get("strong_singleton")]
+            if not victims:
+                continue
+            removed = result.pop(victims[0])
+            result.append(item)
+            reserved.append({"id": key(item), "replaced": key(removed)})
+    return result, {"strategy": "source_ledger_recurrent_functions_v3", "before": [key(i) for i in selected],
+                    "after": [key(i) for i in result],
+                    "rank_constant": rank_constant, "selected_extra_vote": not is_entity,
+                    "evidence_pinned": [key(i) for i in pinned],
+                    "grounded_counterevidence": [key(i) for i in eligible if contradicted(i)],
+                    "source_reservoir": reserved,
+                    "source_ledger": list(entity_evidence.values()),
+                    "recovered": [key(i) for i in result if key(i) not in original]}
 
 
 def _closure_flow_support(flow_traces: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -7613,6 +7784,21 @@ def dynamic_localize(
     )
     artifact_mappings.extend(generated_mappings)
     rank_stage_snapshots["modification_closure"] = _rank_stage_snapshot(ranked, limit=top_k)
+    if _env_bool("MYCODE_JOINT_EVIDENCE_V2", False):
+        # Final file RRF overrode grounded head/closure decisions and even
+        # reintroduced generated artifacts. Keep the already-verified order.
+        joint_files = {"strategy": "preserve_precision_closure_order_v3",
+                       "before": [i.path for i in ranked], "after": [i.path for i in ranked],
+                       "recovered": []}
+        ledger = _reread_function_ledger(
+            index, [r.ranked_functions for r in rounds], _issue_query_text(sample.issue_text),
+            limit=_env_int("MYCODE_FUNCTION_REREAD_LIMIT", 24, minimum=0),
+        ) if _env_bool("MYCODE_FUNCTION_SOURCE_LEDGER", True) else {}
+        ranked_functions, joint_functions = _joint_round_consensus(
+            ranked_functions, [r.ranked_functions for r in rounds], key=lambda i: i.id,
+            contexts=all_context_map, top_k=top_k, entity_evidence=ledger)
+        round_selection["joint_evidence_v2"] = {"files": joint_files, "functions": joint_functions}
+        rank_stage_snapshots["joint_evidence_v2"] = _rank_stage_snapshot(ranked, limit=top_k)
     modification_closure["ranking_adjustment"] = closure_rerank
     modification_closure["ranking_kept_separate"] = not bool(closure_rerank.get("applied"))
     phase_event(

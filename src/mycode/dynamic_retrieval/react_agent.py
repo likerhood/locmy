@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -300,6 +301,25 @@ def _heuristic_move(
     }
 
 
+def _requested_read_paths(queries: Iterable[str], index: RepositoryIndex) -> tuple[list[str], list[dict[str, str]]]:
+    """Resolve explicit relative paths only; never broaden the tool's index."""
+    resolved: list[str] = []
+    rejected: list[dict[str, str]] = []
+    for query in queries:
+        for token in re.findall(r"[\w.@+\-/\\]+\.[A-Za-z0-9]+", str(query)):
+            path = token.replace("\\", "/")
+            while path.startswith("./"):
+                path = path[2:]
+            if path.startswith("/") or ".." in path.split("/"):
+                rejected.append({"path": token, "reason": "outside_repository"})
+            elif path in index.files:
+                if path not in resolved:
+                    resolved.append(path)
+            else:
+                rejected.append({"path": token, "reason": "not_in_tool_index"})
+    return resolved, rejected
+
+
 def _run_tool(
     *,
     move: dict[str, Any],
@@ -330,8 +350,23 @@ def _run_tool(
             limit=max(8, min(14, top_k)),
         )
     if tool == "ReadCode":
-        read_paths = _dedupe(candidate_paths, limit=max(8, min(18, top_k * 2)))
-        return ReadCodeTool(index).run(read_paths, tool_queries, limit=max(8, min(18, len(read_paths))))
+        enabled = str(os.environ.get("MYCODE_READ_EXPLICIT_PATHS", "0")).lower() in {"1", "true", "yes", "on"}
+        requested, rejected = _requested_read_paths(move.get("queries") or [], index)
+        budget = max(8, min(18, top_k * 2))
+        read_paths = _dedupe((requested if enabled else []) + candidate_paths, limit=budget)
+        observation = ReadCodeTool(index).run(read_paths, tool_queries, limit=max(8, min(18, len(read_paths))))
+        observation.metadata["read_execution"] = {
+            "explicit_path_priority_enabled": enabled,
+            "requested_index_paths": requested,
+            "rejected_requests": rejected,
+            "submitted_paths": read_paths,
+            "returned_paths": [item.get("path") for item in observation.candidates],
+            "snippet_paths": [item.get("path") for item in observation.candidates if item.get("snippets")],
+            "budget": budget,
+            "unsubmitted_requests": [path for path in requested if path not in read_paths],
+            "note": "submitted paths are not proof of returned source; inspect tool snippets",
+        }
+        return observation
     return None
 
 
@@ -573,6 +608,7 @@ def run_react_tool_agent(
                     "seed_files": observation_dict.get("seed_files", [])[:12],
                     "notes": observation_dict.get("notes", [])[:4],
                     "metadata_keys": sorted((observation_dict.get("metadata") or {}).keys())[:12],
+                    "read_execution": (observation_dict.get("metadata") or {}).get("read_execution"),
                     "evidence_gain_count": evidence_gain_count,
                     "new_candidate_count": new_candidate_count,
                     "new_read_count": new_read_count,

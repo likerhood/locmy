@@ -10,6 +10,7 @@ from typing import Any, Callable, Iterable
 
 from mycode.evidence.tools.json_response import parse_json_response
 from mycode.utils.model_profile import ModelProtocolProfile, active_model_profile, profile_int
+from mycode.dynamic_retrieval.fileloc_policy import enabled, operation_quote, quote_alignment, review_gaps
 
 
 CandidateReviewLLM = Callable[..., dict[str, Any] | str]
@@ -195,7 +196,7 @@ def _candidate_packet(
                     "id": f"C{rank}S{snippet_number}",
                     "start_line": snippet.get("start_line"),
                     "end_line": snippet.get("end_line"),
-                    "text": str(snippet.get("text") or "")[:900],
+                    "text": str(snippet.get("text") or "")[:6000 if enabled("MYCODE_FILELOC_REVIEW_COVERAGE") else 900],
                 }
             )
             if len(snippets) >= 2:
@@ -314,6 +315,22 @@ def _prompt(
             "The selected snippet and entity must refer to the same code region: choose a snippet that contains the "
             "entity or overlaps its source lines. Do not combine an unrelated snippet and entity merely because they "
             "come from the same file.\n"
+        )
+    if enabled("MYCODE_FILELOC_OWNER_CHALLENGE"):
+        profile_rules += (
+            "Bind the quoted operation and entity to the SAME implementation region. An import, option declaration "
+            "or sibling function is not proof. Compare the caller with the actual operator/consumer. If ownership "
+            "is unresolved, request a specific implementation read in next_queries; do not invent paths. For a "
+            "file-only style/config/shader owner, entity_id may be null: provide file_anchor as the exact selector, "
+            "configuration key or shader symbol in the selected operational snippet.\n"
+        )
+    if enabled("MYCODE_FILELOC_REVIEW_COVERAGE"):
+        profile_rules += (
+            "Review EVERY supplied path, including lower-ranked ones. Missing evidence is not rejection. "
+            "For each missing implementation ask a concrete definition/call/write/selector-use read. "
+            "Cross-function ownership can cite operation_snippet_id and relation_snippet_id, plus operation_entity_id: "
+            "the former must be inside that entity, the latter must actually call it in source. "
+            "Do not infer behavior from imports alone.\n"
         )
     return (
         "You are the final edit-responsibility judge for repository issue localization.\n"
@@ -471,6 +488,33 @@ def _validate(
             and direct_flow_supported
             and patch_mechanism
         )
+        strict_owner = enabled("MYCODE_FILELOC_OWNER_CHALLENGE")
+        atomic_aligned = quote_alignment(evidence_quote, entities,
+            snippets_by_path.get(path, {}).values(), entities_by_path.get(path, {}).values()) if strict_owner else True
+        cross_function_supported = False
+        if strict_owner and enabled("MYCODE_FILELOC_REVIEW_COVERAGE"):
+            operation = snippets_by_path.get(path, {}).get(str(item.get("operation_snippet_id") or ""))
+            relation = snippets_by_path.get(path, {}).get(str(item.get("relation_snippet_id") or ""))
+            owner = entities_by_path.get(path, {}).get(str(item.get("operation_entity_id") or ""))
+            if operation and relation and owner and operation is not relation:
+                name = str(owner.get("name") or "")
+                unique_definition = sum(e.get("name") == name for e in entities_by_path.get(path, {}).values()) == 1
+                cross_function_supported = bool(unique_definition and name
+                    and quote_alignment(str(operation.get("text", "")), [owner], [operation], [owner])
+                    and operation_quote(operation.get("text", ""))
+                    and re.search(r"(?<![\w$])" + re.escape(name) + r"\s*\(", str(relation.get("text", ""))))
+                atomic_aligned = atomic_aligned or cross_function_supported
+        anchor = str(item.get("file_anchor") or "").strip()
+        file_anchor_verified = bool(strict_owner and not entities and len(anchor) >= 2
+            and quote_supported and anchor in evidence_quote and operation_quote(evidence_quote))
+        operational = operation_quote(evidence_quote) if strict_owner else True
+        if strict_owner:
+            mechanism_verified = bool(
+                (verdict == "verified" if compact_schema else item.get("mechanism_verified", False))
+                and path in grounded_paths and quote_supported and direct_flow_supported and patch_mechanism
+                and operational and (atomic_aligned or file_anchor_verified))
+        unconfirmed = bool(strict_owner and role in {"patch_target", "supporting_target"}
+                           and not mechanism_verified)
         counterevidence = _dedupe(
             _text_list(item.get("counterevidence"))
             + (
@@ -497,6 +541,14 @@ def _validate(
                 "unsupported_entities": unsupported_entities[:8],
                 "direct_flow_supported": direct_flow_supported,
                 "mechanism_verified": mechanism_verified,
+                "responsibility_unconfirmed": unconfirmed,
+                "atomic_entity_quote_aligned": atomic_aligned if strict_owner else None,
+                "operation_quote_supported": operational if strict_owner else None,
+                "file_anchor_verified": file_anchor_verified,
+                "cross_function_supported": cross_function_supported,
+                "cross_function_evidence": ({"operation": str(operation.get("text", ""))[:600],
+                    "relation": str(relation.get("text", ""))[:600],"entity": owner.get("name")}
+                    if cross_function_supported else None),
                 "patch_mechanism": patch_mechanism,
                 "counterevidence": counterevidence,
                 "counterevidence_missing": bool(
@@ -560,7 +612,7 @@ def _validate(
         and bool(best_patch.get("grounded"))
         and bool(best_patch.get("mechanism_verified"))
         and float(best_patch.get("confidence") or 0.0) >= 0.85
-        and (best_patch.get("entities") or [])
+        and ((best_patch.get("entities") or []) or best_patch.get("file_anchor_verified"))
         and "concern" in matched_axes
         and matched_axes.intersection({"call", "flow", "program", "behavior"})
         and not critical_missing
@@ -568,7 +620,12 @@ def _validate(
         and counterevidence_complete
         and (not profile.require_owner_contrast or owner_contrast_complete)
     )
-    continue_search = bool(data.get("continue_search", False))
+    gaps = review_gaps(candidates) if enabled("MYCODE_FILELOC_OWNER_CHALLENGE") else []
+    if gaps:
+        missing_evidence = _dedupe(missing_evidence + gaps, limit=10)
+        critical_missing = _dedupe(critical_missing + gaps, limit=10)
+        stop_ready = False
+    continue_search = bool(data.get("continue_search", False) or gaps)
     if not any(item.get("mechanism_verified") for item in candidates) or (compact_schema and selected is None):
         continue_search = True
     if profile.require_counterevidence and (review_coverage < 1.0 or not counterevidence_complete):
@@ -582,7 +639,7 @@ def _validate(
         "missing_evidence": missing_evidence,
         "critical_missing_evidence": critical_missing,
         "stop_ready": stop_ready,
-        "next_queries": _dedupe(data.get("next_queries", []) or [], limit=12),
+        "next_queries": _dedupe(gaps + list(data.get("next_queries", []) or []), limit=12),
         "selected_head": selected["path"] if selected is not None else None,
         "prompt_schema": "evidence_ids_v2" if compact_schema else "legacy_v1",
         "model_profile": profile.name,
@@ -606,7 +663,32 @@ def review_candidates(
     candidate_limit: int = 12,
     repair_attempts: int = 1,
     model_profile: ModelProtocolProfile | None = None,
+    _coverage_batch: bool = False,
 ) -> dict[str, Any]:
+    if enabled("MYCODE_FILELOC_REVIEW_COVERAGE") and not _coverage_batch:
+        ranked, code_contexts, flow_traces = list(ranked)[:15], list(code_contexts), list(flow_traces)
+        batches = []
+        for offset in range(0, len(ranked), 5):
+            group_paths = {item.path for item in ranked[offset:offset+5]}
+            group_flows = sorted(flow_traces, key=lambda flow: not bool(
+                group_paths.intersection(flow.get('candidate_target_paths', []))))
+            batches.append(review_candidates(llm=llm,issue_text=issue_text,issue_sketch=issue_sketch,
+                ranked=ranked[offset:offset+5],code_contexts=code_contexts,flow_traces=group_flows,
+                round_no=round_no,candidate_limit=5,repair_attempts=repair_attempts,
+                model_profile=model_profile,_coverage_batch=True))
+        candidates = [c for b in batches for c in b.get("candidates", [])]
+        reviewed = {c["path"] for c in candidates}
+        missing = [r.path for r in ranked if r.path not in reviewed]
+        gaps = [f"Read implementation and review {path}" for path in missing]
+        return dict(status="ok" if candidates else "error",candidates=candidates,
+            candidate_count=len(ranked),reviewed_count=len(reviewed),unreviewed_paths=missing,
+            continue_search=bool(missing or any(b.get("continue_search", True) for b in batches)),
+            stop_ready=not missing and all(b.get("stop_ready",False) for b in batches),
+            next_queries=_dedupe(gaps+[q for b in batches for q in b.get("next_queries",[])],limit=30),
+            missing_evidence=_dedupe(gaps+[q for b in batches for q in b.get("missing_evidence",[])],limit=30),
+            critical_missing_evidence=_dedupe(gaps+[q for b in batches for q in b.get("critical_missing_evidence",[])],limit=30),
+            attempts=[a for b in batches for a in b.get("attempts",[])],
+            coverage_batches=[dict(status=b.get("status"),paths=[c["path"] for c in b.get("candidates",[])]) for b in batches])
     profile = model_profile or active_model_profile()
     flow_traces = list(flow_traces)
     flow_evidence = _flow_packet(flow_traces)
@@ -667,6 +749,8 @@ def review_candidates(
         profile=profile,
     )
     cache_payload = {
+        "fileloc_owner_challenge": enabled("MYCODE_FILELOC_OWNER_CHALLENGE"),
+        "fileloc_review_coverage": enabled("MYCODE_FILELOC_REVIEW_COVERAGE"),
         "prompt_schema": "evidence_ids_v2",
         "model_profile": profile.name,
         "llm_identity": id(llm),

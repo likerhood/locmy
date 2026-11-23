@@ -352,6 +352,12 @@ def _run_tool(
     if tool == "ReadCode":
         enabled = str(os.environ.get("MYCODE_READ_EXPLICIT_PATHS", "0")).lower() in {"1", "true", "yes", "on"}
         requested, rejected = _requested_read_paths(move.get("queries") or [], index)
+        from mycode.dynamic_retrieval.fileloc_policy import enabled as policy_enabled, resolve_reads
+        resolution = []
+        if policy_enabled("MYCODE_FILELOC_READ_RECONCILE"):
+            enabled = True
+            requested, resolution = resolve_reads(move.get("queries") or [], index.files)
+            rejected = [event for event in resolution if not event.get("path")]
         budget = max(8, min(18, top_k * 2))
         read_paths = _dedupe((requested if enabled else []) + candidate_paths, limit=budget)
         observation = ReadCodeTool(index).run(read_paths, tool_queries, limit=max(8, min(18, len(read_paths))))
@@ -364,6 +370,7 @@ def _run_tool(
             "snippet_paths": [item.get("path") for item in observation.candidates if item.get("snippets")],
             "budget": budget,
             "unsubmitted_requests": [path for path in requested if path not in read_paths],
+            "path_resolution": resolution,
             "note": "submitted paths are not proof of returned source; inspect tool snippets",
         }
         return observation

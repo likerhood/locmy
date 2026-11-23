@@ -3654,6 +3654,12 @@ def _apply_llm_candidate_review(
             adjustment = max(-max_penalty, max_penalty * raw_factor)
         if counterevidence and not mechanism_verified:
             adjustment -= min(max_penalty * 0.35, 6.0 * len(counterevidence))
+        if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False) and not mechanism_verified:
+            # Missing or unaligned evidence is not an independently grounded refutation.
+            aligned = (decision.get('atomic_entity_quote_aligned') is not False
+                       or decision.get('file_anchor_verified') or decision.get('cross_function_supported'))
+            if not (grounded and aligned and decision.get("quote_supported") and counterevidence):
+                adjustment = max(0.0, adjustment)
         item.score += adjustment
         item.score_components["llm_candidate_review"] = round(adjustment, 3)
         components = component_scores.setdefault(norm, {})
@@ -3722,6 +3728,9 @@ def _candidate_evidence_facts(
     equivalent_mechanism = bool(
         patchable and read_verified and quote_supported and entity_supported and direct_flow
     )
+    if _env_bool('MYCODE_FILELOC_REVIEW_COVERAGE', False):
+        from mycode.dynamic_retrieval.fileloc_policy import responsibility_aligned
+        equivalent_mechanism = equivalent_mechanism and responsibility_aligned(resolved_decision)
     lock_eligible = bool(
         patchable
         and not counterevidence
@@ -3885,6 +3894,9 @@ def _cross_round_candidate_frontier(
             and bool(decision.get("supported_entities") or decision.get("entity_supported"))
             and program_direct
         )
+        if _env_bool('MYCODE_FILELOC_REVIEW_COVERAGE', False):
+            from mycode.dynamic_retrieval.fileloc_policy import responsibility_aligned
+            equivalent_mechanism = equivalent_mechanism and responsibility_aligned(decision)
         strong = bool(
             mechanism
             or equivalent_mechanism
@@ -4176,6 +4188,9 @@ def _precision_rerank_locations(
             and entity_supported
             and direct_program_evidence
         )
+        if _env_bool('MYCODE_FILELOC_REVIEW_COVERAGE', False):
+            from mycode.dynamic_retrieval.fileloc_policy import responsibility_aligned
+            equivalent_mechanism = equivalent_mechanism and responsibility_aligned(decision)
         if architecture_only:
             quality -= 4.0
             evidence_reasons.append("architecture_only_penalty")
@@ -4752,13 +4767,56 @@ def _run_search_round(
             architecture_capped=architecture_lane_policy.get("adjusted_count"),
         )
     with phase_context("dynamic.ReadCode", round_no=round_no, candidate_count=len(initial_ranked)):
+        from mycode.dynamic_retrieval.fileloc_policy import enabled as fileloc_enabled, resolve_reads
+        read_ranked = initial_ranked
+        read_queries = retrieval_queries
+        reconciled_reads = {}
+        if fileloc_enabled("MYCODE_FILELOC_READ_RECONCILE"):
+            pending = list((previous_round_progress or {}).get("fileloc_pending_reads", []))
+            requested, resolutions = resolve_reads(pending + controller_queries, index.files)
+            # An exact symbol gets its own definition lookup; background prose and URLs
+            # do not compete in this bounded read-only lane or alter entity ranking.
+            exact_symbols = re.findall(r"`([A-Za-z_$][\w$]*)`", sample.issue_text)[:8]
+            symbol_hits = index.search_entities(exact_symbols, limit=8) if exact_symbols else []
+            for hit in symbol_hits:
+                if hit.path in index.files and hit.name in exact_symbols and hit.path not in requested:
+                    requested.append(hit.path)
+            requested = requested[:3]
+            existing = {item.path: item for item in initial_ranked}
+            read_ranked = [existing.get(path) or RankedLocation(path=path, score=0.0,
+                reasons=["explicit_implementation_read_not_rank_boost"]) for path in requested]
+            read_ranked += [item for item in initial_ranked if item.path not in requested]
+            read_queries = _dedupe(pending + exact_symbols + retrieval_queries)
+            reconciled_reads = {"requested_paths": requested, "resolution": resolutions,
+                                "priority_limit": 3, "candidate_pool_unchanged": True}
         code_contexts = _read_code_context(
             index,
-            initial_ranked,
-            retrieval_queries,
+            read_ranked,
+            read_queries,
             limit=_env_int("MYCODE_CODE_CONTEXT_LIMIT", 10, minimum=1),
         )
         phase_event("progress", "dynamic.ReadCode", context_count=len(code_contexts))
+        if reconciled_reads:
+            # Exact implementation requests receive a definition window rather than
+            # another import/reference hit. Keep the same three-snippet/file budget.
+            requested_terms = set(re.findall(r"[A-Za-z_$][\w$]*", " ".join(pending + exact_symbols)))
+            for context in code_contexts:
+                if context["path"] not in reconciled_reads["requested_paths"]:
+                    continue
+                definitions = [e for e in index.entities if e.path == context["path"] and e.name in requested_terms]
+                if definitions:
+                    entity = definitions[0]
+                    lines = index.files[entity.path].splitlines()
+                    start = max(0, entity.start_line - 1)
+                    end = min(len(lines), entity.end_line, start + 36)
+                    window = {"start_line": start + 1, "end_line": end,
+                              "text": "\n".join(f"{j + 1}: {lines[j]}" for j in range(start, end))}
+                    context["snippets"] = [window] + context.get("snippets", [])[:2]
+                    context["entities"] = [{"kind": e.kind, "name": e.name,
+                        "start_line": e.start_line, "end_line": e.end_line} for e in definitions[:5]]
+            reconciled_reads["consumed_paths"] = [c["path"] for c in code_contexts if c.get("snippets")]
+            reconciled_reads["unfulfilled_paths"] = [p for p in reconciled_reads["requested_paths"]
+                if p not in reconciled_reads["consumed_paths"]]
     flow_scope_paths = _dedupe(
         [item.path for item in initial_ranked]
         + round_pool[: _env_int("MYCODE_FLOW_POOL_LIMIT", max(30, top_k * 2), minimum=top_k)],
@@ -4798,6 +4856,12 @@ def _run_search_round(
             component_scores[path]["flow_verifier"] += float(decision.get("bonus") or 0.0)
     ranked = _apply_verifier(initial_ranked, verifier, sample=sample, top_k=top_k, component_scores=component_scores)
     candidate_review: dict[str, Any] = {"status": "disabled", "reason": "review_disabled", "candidates": []}
+    coverage_diagnostics = {}
+    if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False):
+        from mycode.dynamic_retrieval.fileloc_coverage import supplement
+        code_contexts, coverage_diagnostics = supplement(index,ranked,code_contexts,
+            list((previous_round_progress or {}).get("fileloc_pending_reads", [])) + retrieval_queries,
+            (previous_round_progress or {}).get("fileloc_supplement_attempts", []))
     if controller_llm is not None and _env_bool("MYCODE_LLM_CANDIDATE_REVIEW", True):
         with phase_context(
             "dynamic.llm_candidate_review",
@@ -4951,6 +5015,10 @@ def _run_search_round(
         graph_summary=graph_summary,
         verifier=verifier,
     )
+    if reconciled_reads:
+        agent_observation["fileloc_read_reconcile"] = reconciled_reads
+    if coverage_diagnostics:
+        agent_observation["fileloc_review_coverage"] = coverage_diagnostics
     round_localization = {
         "ranked_locations": [item.to_dict() for item in ranked],
         "ranked_modules": [item.to_dict() for item in ranked_modules],
@@ -6381,6 +6449,12 @@ def _partial_closure_fallback(
 def _merge_closure_candidate_reviews(verifiers: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Keep the strongest grounded candidate observation across agent rounds."""
 
+    if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False):
+        from mycode.dynamic_retrieval.fileloc_coverage import merge_evidence
+        candidates, events = merge_evidence([(v or {}).get("llm_candidate_review", {}) for v in verifiers])
+        return dict(status="ok" if candidates else "missing", candidates=candidates,
+                    source="source_responsibility_ledger",evidence_events=events)
+
     best: dict[str, dict[str, Any]] = {}
     attempts: list[dict[str, Any]] = []
     statuses: list[str] = []
@@ -7405,6 +7479,9 @@ def dynamic_localize(
 
     rounds: list[DynamicSearchRound] = []
     active_queries = _dedupe(queries + react_agent.get("next_queries", []) + bootstrap_agent.get("next_queries", []))
+    fileloc_challenge_used = False
+    fileloc_review_history = []
+    fileloc_reinvestigated = set()
     initial_seed_ranking: list[RankedLocation] = [
         RankedLocation(
             path=path,
@@ -7425,6 +7502,10 @@ def dynamic_localize(
     )[:18]
     previous_top_paths: list[str] = []
     previous_round_progress: dict[str, Any] = {}
+    if _env_bool("MYCODE_FILELOC_READ_RECONCILE", False):
+        previous_round_progress["fileloc_pending_reads"] = _dedupe(
+            path for step in react_agent.get("steps", [])
+            for path in ((step.get("observation") or {}).get("read_execution") or {}).get("requested_index_paths", []))[:3]
     best_round: DynamicSearchRound | None = None
     best_round_quality: dict[str, Any] = {"score": -1.0, "reason": "not_started"}
     checkpoint_updates: list[dict[str, Any]] = []
@@ -7468,6 +7549,38 @@ def dynamic_localize(
         default_followup_mode = "on_demand" if controller_llm is not None else "always"
         followup_mode = os.environ.get("MYCODE_AGENT_FOLLOWUP_MODE", default_followup_mode).strip().lower()
         candidate_review = (search_round.verifier.get("llm_candidate_review") or {}) if search_round.verifier else {}
+        if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False):
+            from mycode.dynamic_retrieval.fileloc_coverage import merge_evidence
+            fileloc_review_history.append(candidate_review)
+            evidence_memory, memory_events = merge_evidence(fileloc_review_history)
+            present = {item.path for item in search_round.ranked_locations}
+            missing_supported = [c['path'] for c in evidence_memory if c.get('evidence_state') == 'source_supported'
+                                 and c['path'] not in present and c['path'] not in fileloc_reinvestigated][:5]
+            search_round.agent_observation['fileloc_source_memory'] = {
+                'evidence': evidence_memory, 'events': memory_events, 'investigation_requests': missing_supported,
+                'note': 'Investigation priority only; no permanent Top15 retention or score bonus'}
+            if missing_supported and round_no < max_rounds:
+                fileloc_reinvestigated.update(missing_supported)
+                requests = [f'Read implementation responsibility {p}' for p in missing_supported]
+                candidate_review['next_queries'] = _dedupe(requests + list(candidate_review.get('next_queries', [])))
+                candidate_review['continue_search'] = True
+                search_round.next_queries = _dedupe(requests + search_round.next_queries)
+                search_round.stop_decision.update(stop=False, reason='source_responsibility_reinvestigation')
+        if (_env_bool("MYCODE_FILELOC_OWNER_CHALLENGE", False) and not fileloc_challenge_used
+                and round_no < max_rounds and any(c.get("responsibility_unconfirmed")
+                    for c in candidate_review.get("candidates", [])[:2])):
+            from mycode.dynamic_retrieval.fileloc_policy import challenge_paths
+            contrast_paths, contrast_sources = challenge_paths(index, search_round.ranked_locations,
+                sample.issue_text if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False) else None)
+            if contrast_paths:
+                fileloc_challenge_used = True
+                requests = [f"Read actual implementation {path}" for path in contrast_paths]
+                search_round.next_queries = _dedupe(requests + search_round.next_queries)
+                candidate_review["next_queries"] = _dedupe(requests + list(candidate_review.get("next_queries", [])))
+                search_round.stop_decision.update(stop=False, reason="fileloc_owner_contrast_pending")
+                search_round.agent_observation["fileloc_owner_challenge"] = {
+                    "paths": contrast_paths, "sources": contrast_sources,
+                    "maximum_per_task": 1, "execution": "next_existing_round_no_extra_model_call"}
         round_confidence = search_round.stop_decision.get("confidence", {}) or {}
         followup_threshold = _env_float("MYCODE_AGENT_FOLLOWUP_CONFIDENCE", 0.58, minimum=0.0)
         followup_requested = bool(candidate_review.get("continue_search"))
@@ -7596,6 +7709,13 @@ def dynamic_localize(
         previous_flow_traces = search_round.flow_traces
         previous_top_paths = search_round.stop_decision.get("top_paths", [])
         previous_round_progress = dict(search_round.frontier_state.get("round_progress") or {})
+        if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False):
+            previous_round_progress["fileloc_supplement_attempts"] = search_round.agent_observation.get(
+                "fileloc_review_coverage", {}).get("attempted_signatures", [])
+        if _env_bool("MYCODE_FILELOC_READ_RECONCILE", False):
+            previous_round_progress["fileloc_pending_reads"] = (
+                list(candidate_review.get("next_queries", []) or [])
+                + list(candidate_review.get("missing_evidence", []) or []))[:12]
         search_trace.append(
             {
                 "step": f"round_{round_no}",
@@ -7800,6 +7920,15 @@ def dynamic_localize(
         round_selection["joint_evidence_v2"] = {"files": joint_files, "functions": joint_functions}
         rank_stage_snapshots["joint_evidence_v2"] = _rank_stage_snapshot(ranked, limit=top_k)
     modification_closure["ranking_adjustment"] = closure_rerank
+    if _env_bool("MYCODE_FILELOC_LISTWISE_RANK", False):
+        from mycode.dynamic_retrieval.fileloc_coverage import listwise_rank
+        before_functions = [item.id for item in ranked_functions]
+        ranked, fileloc_listwise = listwise_rank(controller_llm,_issue_query_text(sample.issue_text),
+            ranked,code_contexts,merged_candidate_review.get("candidates",[]))
+        assert [item.id for item in ranked_functions] == before_functions
+        round_selection["fileloc_listwise"] = fileloc_listwise
+        rank_stage_snapshots["fileloc_listwise_before"] = [dict(path=p) for p in fileloc_listwise["before"]]
+        rank_stage_snapshots["fileloc_listwise_after"] = _rank_stage_snapshot(ranked,limit=top_k)
     modification_closure["ranking_kept_separate"] = not bool(closure_rerank.get("applied"))
     phase_event(
         "progress",

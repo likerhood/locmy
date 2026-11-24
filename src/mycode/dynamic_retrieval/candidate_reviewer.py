@@ -665,7 +665,7 @@ def review_candidates(
     model_profile: ModelProtocolProfile | None = None,
     _coverage_batch: bool = False,
 ) -> dict[str, Any]:
-    if enabled("MYCODE_FILELOC_REVIEW_COVERAGE") and not _coverage_batch:
+    if (enabled("MYCODE_FILELOC_REVIEW_COVERAGE") or enabled("MYCODE_FILELOC_EXECUTION_V3")) and not _coverage_batch:
         ranked, code_contexts, flow_traces = list(ranked)[:15], list(code_contexts), list(flow_traces)
         batches = []
         for offset in range(0, len(ranked), 5):
@@ -679,9 +679,24 @@ def review_candidates(
         candidates = [c for b in batches for c in b.get("candidates", [])]
         reviewed = {c["path"] for c in candidates}
         missing = [r.path for r in ranked if r.path not in reviewed]
+        recovery = []
+        if missing and enabled('MYCODE_FILELOC_EXECUTION_V3'):
+            # Retry only omitted paths once; never manufacture a successful review.
+            omitted = [r for r in ranked if r.path in missing]
+            for offset in range(0, len(omitted), 3):
+                extra = review_candidates(llm=llm, issue_text=issue_text, issue_sketch=issue_sketch,
+                    ranked=omitted[offset:offset+3], code_contexts=code_contexts, flow_traces=flow_traces,
+                    round_no=round_no, candidate_limit=3, repair_attempts=0, model_profile=model_profile,
+                    _coverage_batch=True)
+                permitted = {r.path for r in omitted[offset:offset+3]}
+                additions = [c for c in extra.get('candidates', []) if c['path'] in permitted and c['path'] not in reviewed]
+                candidates.extend(additions); reviewed.update(c['path'] for c in additions)
+                recovery.append(dict(requested=sorted(permitted), recovered=[c['path'] for c in additions], status=extra.get('status')))
+            missing = [r.path for r in ranked if r.path not in reviewed]
         gaps = [f"Read implementation and review {path}" for path in missing]
         return dict(status="ok" if candidates else "error",candidates=candidates,
             candidate_count=len(ranked),reviewed_count=len(reviewed),unreviewed_paths=missing,
+            omission_recovery=recovery,
             continue_search=bool(missing or any(b.get("continue_search", True) for b in batches)),
             stop_ready=not missing and all(b.get("stop_ready",False) for b in batches),
             next_queries=_dedupe(gaps+[q for b in batches for q in b.get("next_queries",[])],limit=30),

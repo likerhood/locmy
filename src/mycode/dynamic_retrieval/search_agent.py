@@ -4857,7 +4857,13 @@ def _run_search_round(
     ranked = _apply_verifier(initial_ranked, verifier, sample=sample, top_k=top_k, component_scores=component_scores)
     candidate_review: dict[str, Any] = {"status": "disabled", "reason": "review_disabled", "candidates": []}
     coverage_diagnostics = {}
-    if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False):
+    if _env_bool("MYCODE_FILELOC_EXECUTION_V3", False):
+        from mycode.dynamic_retrieval.fileloc_revision import targeted_contexts
+        code_contexts, coverage_diagnostics = targeted_contexts(index, ranked, code_contexts,
+            list((previous_round_progress or {}).get("fileloc_pending_reads", [])) + retrieval_queries,
+            issue_text=_issue_query_text(sample.issue_text),
+            attempted=(previous_round_progress or {}).get("fileloc_supplement_attempts", []))
+    elif _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False):
         from mycode.dynamic_retrieval.fileloc_coverage import supplement
         code_contexts, coverage_diagnostics = supplement(index,ranked,code_contexts,
             list((previous_round_progress or {}).get("fileloc_pending_reads", [])) + retrieval_queries,
@@ -5642,7 +5648,12 @@ def _rank_entities(
                     if reason not in entity.reasons:
                         entity.reasons.append(reason)
 
-    function_ranked = sorted(functions.values(), key=lambda item: (-item.score, item.path, item.name))[:top_k]
+    if _env_bool("MYCODE_FUNCTION_CALIBRATION_V3", False):
+        from mycode.dynamic_retrieval.fileloc_revision import calibrate_functions
+        function_ranked = calibrate_functions(index, list(functions.values()), ranked_files,
+            str(next(iter(entity_queries), '')), (candidate_review or {}).get('candidates', []))[:top_k]
+    else:
+        function_ranked = sorted(functions.values(), key=lambda item: (-item.score, item.path, item.name))[:top_k]
     module_ranked = sorted(modules.values(), key=lambda item: (-item.score, item.path, item.name))[:top_k]
     return module_ranked, function_ranked
 
@@ -7709,10 +7720,10 @@ def dynamic_localize(
         previous_flow_traces = search_round.flow_traces
         previous_top_paths = search_round.stop_decision.get("top_paths", [])
         previous_round_progress = dict(search_round.frontier_state.get("round_progress") or {})
-        if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False):
+        if _env_bool("MYCODE_FILELOC_REVIEW_COVERAGE", False) or _env_bool("MYCODE_FILELOC_EXECUTION_V3", False):
             previous_round_progress["fileloc_supplement_attempts"] = search_round.agent_observation.get(
                 "fileloc_review_coverage", {}).get("attempted_signatures", [])
-        if _env_bool("MYCODE_FILELOC_READ_RECONCILE", False):
+        if _env_bool("MYCODE_FILELOC_READ_RECONCILE", False) or _env_bool("MYCODE_FILELOC_EXECUTION_V3", False):
             previous_round_progress["fileloc_pending_reads"] = (
                 list(candidate_review.get("next_queries", []) or [])
                 + list(candidate_review.get("missing_evidence", []) or []))[:12]
@@ -7785,9 +7796,15 @@ def dynamic_localize(
         "best_round": _rank_stage_snapshot(ranked, limit=top_k),
     }
     ranked, artifact_mappings = _transfer_artifact_evidence(ranked, index)
+    eligible_seeds = [item for item in initial_seed_ranking if item.path in fast_seed_paths]
+    if _env_bool("MYCODE_CANDIDATE_CONTINUITY_V3", False):
+        from mycode.dynamic_retrieval.fileloc_revision import backed
+        source_positive = {r['path'] for r in merged_candidate_review.get('candidates', []) if backed(r)}
+        if source_positive.intersection({r.path for r in ranked}):
+            eligible_seeds = [r for r in eligible_seeds if r.path in source_positive]
     ranked, seed_retention = restore_seed_frontier(
         ranked,
-        [item for item in initial_seed_ranking if item.path in fast_seed_paths],
+        eligible_seeds,
         index=index,
         review=merged_candidate_review,
         top_k=top_k,
@@ -7828,6 +7845,12 @@ def dynamic_localize(
         top_k=top_k,
     )
     rank_stage_snapshots["head_selector"] = _rank_stage_snapshot(ranked, limit=top_k)
+    continuity = {}
+    if _env_bool("MYCODE_CANDIDATE_CONTINUITY_V3", False):
+        from mycode.dynamic_retrieval.fileloc_revision import recover_source_candidates
+        ranked, continuity = recover_source_candidates(ranked, [r.ranked_locations for r in rounds],
+            merged_candidate_review.get('candidates', []), code_contexts, top_k=top_k)
+        rank_stage_snapshots['source_continuity_v3'] = _rank_stage_snapshot(ranked, limit=top_k)
     round_selection = {
         "enabled": use_checkpoint,
         "selected_round": selected_round.round_no,
@@ -7839,6 +7862,7 @@ def dynamic_localize(
         "cross_round_frontier": cross_round_frontier,
         "precision_rerank": precision_rerank,
         "seed_retention": seed_retention,
+        "source_continuity_v3": continuity,
     }
     phase_event(
         "progress",
@@ -7920,7 +7944,16 @@ def dynamic_localize(
         round_selection["joint_evidence_v2"] = {"files": joint_files, "functions": joint_functions}
         rank_stage_snapshots["joint_evidence_v2"] = _rank_stage_snapshot(ranked, limit=top_k)
     modification_closure["ranking_adjustment"] = closure_rerank
-    if _env_bool("MYCODE_FILELOC_LISTWISE_RANK", False):
+    if _env_bool("MYCODE_FILELOC_PAIRWISE_V3", False):
+        from mycode.dynamic_retrieval.fileloc_revision import pairwise_rank
+        before_functions = [item.id for item in ranked_functions]
+        ranked, fileloc_pairwise = pairwise_rank(controller_llm, _issue_query_text(sample.issue_text),
+            ranked, code_contexts, merged_candidate_review.get('candidates', []))
+        assert [item.id for item in ranked_functions] == before_functions
+        round_selection['fileloc_pairwise_v3'] = fileloc_pairwise
+        rank_stage_snapshots['fileloc_pairwise_before'] = [dict(path=p) for p in fileloc_pairwise['before']]
+        rank_stage_snapshots['fileloc_pairwise_after'] = _rank_stage_snapshot(ranked, limit=top_k)
+    elif _env_bool("MYCODE_FILELOC_LISTWISE_RANK", False):
         from mycode.dynamic_retrieval.fileloc_coverage import listwise_rank
         before_functions = [item.id for item in ranked_functions]
         ranked, fileloc_listwise = listwise_rank(controller_llm,_issue_query_text(sample.issue_text),

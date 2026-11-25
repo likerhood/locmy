@@ -73,7 +73,7 @@ Keep the source fixed across a run and use a new directory after any edit.
 
 ## Current assessment (2026-11-25)
 
-Related offline tests: 43 passed. Initial seed calls move the correct file to position 1 for Chart.js-10806
+Initial offline tests: 43 passed. Initial seed calls move the correct file to position 1 for Chart.js-10806
 and react-pdf-1306. Calypso-21648 exposed a directory-output format issue,
 subsequently addressed with numeric IDs. The marked protection pair encountered
 HTTP 429, classified by the provider message as quota/balance limitation, and
@@ -82,3 +82,33 @@ with deterministic fallback is not successful validation.
 
 Full localization improvement and function/Top15 protection remain unverified.
 No full SWE92/Omni296 run or remote push is part of this implementation record.
+
+## Follow-up tests and seed guard (2026-11-25)
+
+`MYCODE_GALA_SEED_GUARD=1` enables an independent conservative guard after
+seed insertion. It only restores the original incumbent head ahead of
+unverified seed insertions when the existing review records patch-target
+responsibility, grounded mechanism evidence and a supported source quote.
+It does not automatically elevate verified labels from ranks 2/3 or below.
+The step permutes the already bounded Top15 set and never receives functions.
+Default is off; global nomination and this guard can be tested separately.
+
+An earlier, broader guard on the original Top3 regressed saved v1 A3 by one
+task (react-pdf-1552). That iteration is retained as a failure. Narrowing the
+guard to the original head avoids changing the old agent's internal order.
+Frozen-stage replay across both historical SWE92 runs (92 cases per run)
+shows no changes in A1/A3/A5/A8/A15, SL or REC. There is no accuracy gain to
+claim from this guard. Downstream head/closure behavior still needs online tests.
+
+Current related offline tests: 49 passed. Exact replay artifacts live under
+`result/gala_v4_guard_replay_20261125_01` and `_02`.
+
+The new model preflight aborts before task dispatch on provider failure and
+writes sanitized `provider_probe.json` and `BLOCKED.json`. It must not count
+deterministic fallback as successful protection. The current final-localization
+attempt is blocked by HTTP 429 quota/balance limitation, with zero task runs.
+
+The paired runner accepts `--variant global`, `guard` or `joint` (default
+global), and `--prepare-only` freezes inputs/source without API calls.
+Four joint-localization inputs and their code/structure fingerprints are
+prepared in `result/gala_v4_joint_prepared_20261125_01`.

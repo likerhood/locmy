@@ -41,6 +41,44 @@ def demote_generated_outputs(ranked, *, files, issue_text):
             + [item for item in ranked if item.path in outputs]), mappings
 
 
+def apply_verified_seed_guard(ordered, incumbent, retained_paths, review):
+    """Reorder a fixed file set; never create a source-verification claim."""
+    decisions = {row.get("path"): row for row in review.get("candidates", [])}
+
+    def direct_source_responsibility(path):
+        decision = decisions.get(path, {})
+        return bool(
+            decision.get("role") == "patch_target"
+            and decision.get("grounded")
+            and decision.get("mechanism_verified")
+            and (decision.get("evidence_quote") or decision.get("quote_supported"))
+            and not decision.get("counterevidence_grounded")
+        )
+
+    bounded = list(ordered)
+    before = [item.path for item in bounded]
+    # Restore only the original incumbent head. A verified label on a lower
+    # candidate does not justify overruling the agent's own original order.
+    protected = [item.path for item in incumbent[:1]
+                 if direct_source_responsibility(item.path)]
+    weak_seeds = {path for path in retained_paths if not direct_source_responsibility(path)}
+    changes = []
+    for path in protected:
+        position = next((n for n, item in enumerate(bounded) if item.path == path), None)
+        if position is None:
+            continue
+        earlier = next((n for n, item in enumerate(bounded[:position])
+                        if item.path in weak_seeds), None)
+        if earlier is not None:
+            item = bounded.pop(position)
+            bounded.insert(earlier, item)
+            changes.append({"path": path, "before": position + 1, "after": earlier + 1,
+                            "reason": "source_verified_responsibility_before_unverified_seed"})
+    assert len(bounded) == len(before) and set(item.path for item in bounded) == set(before)
+    return bounded, {"enabled": True, "changes": changes, "before": before,
+                     "after": [item.path for item in bounded]}
+
+
 def restore_seed_frontier(
     ranked,
     seeds,
@@ -50,6 +88,7 @@ def restore_seed_frontier(
     top_k,
     limit=2,
     minimum_supporting_axes=0,
+    protect_verified_head=False,
 ):
     """Preserve entry-point priors without duplicating or inventing paths.
 
@@ -115,10 +154,15 @@ def restore_seed_frontier(
             chosen.append(item)
     retained = {item.path for item in chosen}
     ordered = chosen + [item for item in ranked if item.path not in retained]
-    return ordered[:top_k], {
+    bounded = ordered[:top_k]
+    report = {
         "strategy": "bounded_seed_prior_then_dynamic_recall",
         "retained": [item.path for item in chosen],
         "rejected": rejected,
         "limit": limit,
         "minimum_supporting_axes": minimum_supporting_axes,
     }
+    if protect_verified_head:
+        bounded, guard = apply_verified_seed_guard(bounded, ranked, retained, review)
+        report["verified_head_guard"] = guard
+    return bounded, report

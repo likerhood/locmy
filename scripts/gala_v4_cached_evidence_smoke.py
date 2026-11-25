@@ -31,6 +31,8 @@ def main():
     parser.add_argument('--run-dir', type=Path, required=True)
     parser.add_argument('--model', default='mimo-v2.6-pro')
     parser.add_argument('--phase', choices=['seed', 'localize'], default='seed')
+    parser.add_argument('--variant', choices=['global', 'guard', 'joint'], default='global')
+    parser.add_argument('--prepare-only', action='store_true', help='Freeze inputs and code without any model call')
     parser.add_argument('--instance-id', action='append', required=True)
     args = parser.parse_args()
     if args.run_dir.exists():
@@ -74,6 +76,10 @@ def main():
         dynamic_rounds=2, react_steps=4, top_k=15,
         protocol='paired v1 localization with cached task-time upstream evidence; not full E2E')
     manifest['runner_sha256'] = sha(Path(__file__))
+    manifest['variant'] = args.variant
+    manifest['arms'] = {'baseline': {'MYCODE_GALA_GLOBAL_FILES': '0', 'MYCODE_GALA_SEED_GUARD': '0'},
+        'improved': {'MYCODE_GALA_GLOBAL_FILES': '1' if args.variant in {'global', 'joint'} else '0',
+                     'MYCODE_GALA_SEED_GUARD': '1' if args.variant in {'guard', 'joint'} else '0'}}
     manifest['fixed_environment'] = {key: os.environ[key] for key in (
         'MYCODE_FAST_SEED_PLANNER', 'MYCODE_FAST_SEED_LLM', 'MYCODE_READ_EXPLICIT_PATHS',
         'MYCODE_JOINT_EVIDENCE_V2', 'MYCODE_FUNCTION_SOURCE_LEDGER', 'MYCODE_FILE_FRONT_RERANK',
@@ -85,6 +91,22 @@ def main():
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / relative, destination)
     shutil.copyfile(Path(__file__), args.run_dir / 'source_snapshot' / Path(__file__).name)
+    if not args.prepare_only:
+        probe = {'model': args.model}
+        try:
+            response = _make_controller_llm(True)('Return JSON {"ready":true}', max_tokens=128)
+            probe['ok'] = bool(response.get('content'))
+        except Exception as exc:
+            status = re.search(r'HTTP (\d{3})', str(exc))
+            message = str(exc).lower()
+            probe.update(ok=False, error_type=type(exc).__name__,
+                http_status=int(status.group(1)) if status else None,
+                quota_or_balance=any(term in message for term in ['quota', 'balance', 'credit', 'insufficient']))
+        (args.run_dir / 'provider_probe.json').write_text(json.dumps(probe, indent=2))
+        if not probe['ok']:
+            (args.run_dir / 'BLOCKED.json').write_text(json.dumps({
+                'reason': 'provider_preflight_failed', 'model_runs_started': 0, **probe}, indent=2))
+            raise SystemExit('Model preflight failed; sanitized details in provider_probe.json; no task runs started')
     outcomes = []
     for number, iid in enumerate(args.instance_id):
         raw = samples[iid]
@@ -101,9 +123,11 @@ def main():
             dataset='swebench_multimodal-full-dev', issue_text=semantic_issue_text(raw['problem_statement']), raw=raw)
         input_payload = dict(sample=raw, evidence=evidence, structure=str(structure), structure_sha256=sha(structure))
         (args.run_dir / f'{iid}.input.json').write_text(json.dumps(input_payload, ensure_ascii=False))
+        if args.prepare_only:
+            continue
         for arm in (['baseline', 'improved'] if number % 2 == 0 else ['improved', 'baseline']):
             assert all(sha(ROOT / p) == value for p, value in hashes.items()), 'Source changed during run'
-            os.environ['MYCODE_GALA_GLOBAL_FILES'] = '1' if arm == 'improved' else '0'
+            os.environ.update(manifest['arms'][arm])
             events = []
             controller = _make_controller_llm(True)
 
@@ -143,6 +167,11 @@ def main():
             (args.run_dir / f'{iid}.{arm}.json').write_text(json.dumps(output, ensure_ascii=False, indent=2))
             outcomes.append(output)
             print('DONE', iid, arm, round(output['elapsed_seconds'], 1), paths[:3], flush=True)
+    if args.prepare_only:
+        (args.run_dir / 'PREPARED.json').write_text(json.dumps({
+            'model_runs_started': 0, 'input_count': len(samples), 'variant': args.variant}, indent=2))
+        print('Prepared frozen inputs; no model calls', flush=True)
+        return
     # Post-hoc scoring only, after every model result has been saved.
     gold = json.loads((args.workspace / 'collected_results/swe92_new/消融统一结果_20261015/frozen_gold.json').read_text())
     scored = []

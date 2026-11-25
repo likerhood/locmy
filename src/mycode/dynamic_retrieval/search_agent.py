@@ -7672,6 +7672,7 @@ def dynamic_localize(
         index=index,
         review=merged_candidate_review,
         top_k=top_k,
+        protect_verified_head=_env_bool("MYCODE_GALA_SEED_GUARD", False),
         limit=profile_int(
             "MYCODE_FINAL_SEED_PREFIX",
             "final_seed_retention_limit",

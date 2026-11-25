@@ -65,6 +65,10 @@ def _completion_request_options(max_tokens: int) -> tuple[str, int, dict[str, An
     thinking = os.environ.get("MYCODE_LLM_THINKING", "").strip().lower()
     if thinking in {"enabled", "disabled"}:
         extra["thinking"] = {"type": thinking}
+    enable_thinking = os.environ.get("MYCODE_LLM_ENABLE_THINKING", "").strip().lower()
+    if enable_thinking in {"true", "false", "1", "0"}:
+        extra.pop("thinking", None)
+        extra["enable_thinking"] = enable_thinking in {"true", "1"}
     response_format = os.environ.get("MYCODE_LLM_RESPONSE_FORMAT", "").strip().lower()
     if response_format in {"json_object", "text"}:
         extra["response_format"] = {"type": response_format}

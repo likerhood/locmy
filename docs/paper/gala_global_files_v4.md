@@ -1,5 +1,64 @@
 # v4: repository-wide semantic file nominations on fileloc-v1
 
+Further experiments on 2026-11-25 (preserve the chronological results below):
+`--variant conflict` compares the complete additive v4 against an optional
+grounded-review conflict guard. Six valid pairs in `_05_` gave File A1
+5/6 -> 6/6, A2--A10 and A15 6/6 on both sides, unchanged File REC15 65.06,
+but Function REC15 52.08 -> 47.92. None of these fresh trajectories triggered
+the conflict guard, so these numerical changes are NOT evidence of a causal
+accuracy gain from that guard. Same-log replay of `_04_` does demonstrate
+that it removes contradictory certification from the Legend candidate.
+
+`MYCODE_GALA_REVIEW_CONFLICT_GUARD=0` defaults off: retain both source-backed
+review observations when verified positive and negative conclusions conflict;
+keep the candidate unresolved rather than certify or delete it by confidence.
+
+`MYCODE_GALA_FUNCTION_RESERVOIR=0` defaults off: collect actual-window-overlap
+supplemental entities separately, reread their exact indexed source, and allow
+only existing source/issue plus exact-entity-review or entity-flow eligibility
+into the bounded tail reservoir. No extra round votes; no file-rank promotion
+of functions; no direct replacement of the consensus top three. Its separate
+reread limit defaults to 48. It is not a correctness certificate.
+
+148 targeted tests pass, including a nonempty supplemental-entity end-to-end
+test. `_06_` was invalidated by an extra list nesting in final ledger assembly;
+the error is fixed and original partial outputs are retained. New `_07_` paired
+tests completed three valid pairs: File A1--A10 remained 3/3, File REC15
+76.19 -> 85.71, Function REC15 unchanged 54.17, Function A2 2/3 -> 1/3.
+However same-trajectory `ablate_gala_function_reservoir.py` reproduced the
+saved final functions exactly and found identical enabled/disabled function
+lists on all three cases. Thus no extra accuracy benefit from the reservoir
+is established. Arc source candidates were saved but lacked independent
+entity-level flow/operation support. Keep both new flags off by default;
+this is not a joint-validation pass. Do not combine best outputs across runs.
+
+Latest follow-up (2026-11-25): real Qwen final-localization development pairs
+have now run; the earlier MiMo quota block below is historical, not the latest
+test state. On six fixed SWE diagnostic cases, the latest additive variant has
+File A1 3/6 -> 5/6, A3 3/6 -> 6/6, A15 5/6 -> 6/6, REC15 54.64 -> 66.19.
+However Chart.js-9678 File A1 regresses (1 -> 2), and Calypso-21648 Function
+A1 regresses (1 -> 2). This is NOT a joint-validation pass or a full benchmark.
+Omni has not been evaluated in this round. Historical GALA Qwen still has
+6/6 File A1 on these cases under different evidence and budgets.
+
+`MYCODE_GALA_VERIFY_NOMINATIONS=1` gives up to three selected global
+hypotheses actual read/flow/review opportunities. Its first implementation
+reallocated existing slots and hurt function coverage. The additional opt-in
+`MYCODE_GALA_ADDITIVE_REVIEW=1` instead preserves the primary investigation,
+adds a separate at-most-six-file review batch, and supplies primary snapshots
+to function ranking. It does not guarantee full search independence: initial
+seeds and cross-round state still interact. All four GALA flags default off;
+use the paired script's `--variant additive` to test the latest combination.
+
+Main and supplemental statuses are audited separately. Follow-up queries,
+missing evidence and continue-search signals survive batch merging. A first
+attempt that omitted this metadata was interrupted and kept in `_03_`
+directories, excluded from the complete `_04_` comparison.
+
+Complete latest comparison: `result/gala_v4_qwen35_additive_20261125_04_summary.json`.
+It includes per-case stages and frozen historical method results. Earlier
+experiments and source snapshots remain in separate result directories.
+
 Base: `magnet-kimi-compat-v3-fileloc-v1` at `f5163fb`.
 Branch: `magnet-kimi-compat-v3-fileloc-v4`.
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import re
 from mycode.dynamic_retrieval.package_navigation import navigation_only_file
+from mycode.dynamic_retrieval.nomination_bridge import explicit_exclusion
 
 
 def generated_source_counterpart(path, files):
@@ -118,7 +119,7 @@ def restore_seed_frontier(
         elif decision.get("grounded") and any(
             code not in {"no_source", "no_entity", "no_flow", "none"}
             for code in decision.get("counterevidence", [])
-        ):
+        ) and (not protect_verified_head or explicit_exclusion(decision)):
             reason = "grounded_counterevidence"
         elif (
             minimum_supporting_axes > 0

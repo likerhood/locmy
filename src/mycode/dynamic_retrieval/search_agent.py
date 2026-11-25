@@ -37,6 +37,7 @@ from mycode.schemas.evidence import NormalizedSample
 from mycode.utils.model_profile import ModelProtocolProfile, active_model_profile, profile_int
 from mycode.utils.phase_logger import phase_context, phase_event
 from mycode.dynamic_retrieval.source_windows import focused_windows
+from mycode.dynamic_retrieval.nomination_bridge import investigation_order, align_read_entities
 
 
 @dataclass
@@ -4359,7 +4360,9 @@ def _run_search_round(
     controller_llm: LLMController | None = None,
     query_groups: dict[str, list[str]] | None = None,
     previous_round_progress: dict[str, Any] | None = None,
+    verification_seeds: list[RankedLocation] | None = None,
 ) -> DynamicSearchRound:
+    additive_review = bool(verification_seeds and _env_bool("MYCODE_GALA_ADDITIVE_REVIEW", False))
     provisional_seed_files = _dedupe([item.path for item in previous_ranked[:8]])
     with phase_context("dynamic.controller", round_no=round_no, seed_count=len(provisional_seed_files), query_count=len(queries)):
         controller_decisions = decide_next_actions(
@@ -4752,15 +4755,18 @@ def _run_search_round(
             architecture_capped=architecture_lane_policy.get("adjusted_count"),
         )
     with phase_context("dynamic.ReadCode", round_no=round_no, candidate_count=len(initial_ranked)):
+        read_order = investigation_order(initial_ranked, verification_seeds, files=index.files) if verification_seeds and not additive_review else initial_ranked
         code_contexts = _read_code_context(
             index,
-            initial_ranked,
+            read_order,
             retrieval_queries,
             limit=_env_int("MYCODE_CODE_CONTEXT_LIMIT", 10, minimum=1),
         )
+        if verification_seeds and not additive_review:
+            code_contexts = align_read_entities(code_contexts, index.entities)
         phase_event("progress", "dynamic.ReadCode", context_count=len(code_contexts))
     flow_scope_paths = _dedupe(
-        [item.path for item in initial_ranked]
+        [item.path for item in read_order]
         + round_pool[: _env_int("MYCODE_FLOW_POOL_LIMIT", max(30, top_k * 2), minimum=top_k)],
         limit=_env_int("MYCODE_FLOW_POOL_LIMIT", max(30, top_k * 2), minimum=top_k),
     )
@@ -4772,7 +4778,7 @@ def _run_search_round(
         sample=sample,
         evidence_result=evidence_result,
         active_queries=active_queries,
-        candidate_paths=[item.path for item in initial_ranked],
+        candidate_paths=[item.path for item in read_order],
         issue_sketch=build_issue_sketch(sample, evidence_result),
         confidence=pre_flow_confidence,
         round_no=round_no,
@@ -4797,6 +4803,7 @@ def _run_search_round(
         if path:
             component_scores[path]["flow_verifier"] += float(decision.get("bonus") or 0.0)
     ranked = _apply_verifier(initial_ranked, verifier, sample=sample, top_k=top_k, component_scores=component_scores)
+    review_order = investigation_order(ranked, verification_seeds, files=index.files) if verification_seeds and not additive_review else ranked
     candidate_review: dict[str, Any] = {"status": "disabled", "reason": "review_disabled", "candidates": []}
     if controller_llm is not None and _env_bool("MYCODE_LLM_CANDIDATE_REVIEW", True):
         with phase_context(
@@ -4808,7 +4815,7 @@ def _run_search_round(
                 llm=controller_llm,
                 issue_text=_issue_query_text(sample.issue_text),
                 issue_sketch=build_issue_sketch(sample, evidence_result),
-                ranked=ranked,
+                ranked=review_order,
                 code_contexts=code_contexts,
                 flow_traces=flow_traces,
                 round_no=round_no,
@@ -4837,13 +4844,75 @@ def _run_search_round(
                 ],
             )
         ranked = _apply_llm_candidate_review(
-            ranked,
+            ranked + [item for item in review_order if item.path not in {row.path for row in ranked}],
             candidate_review,
             component_scores=component_scores,
             top_k=top_k,
             code_contexts=code_contexts,
         )
     verifier["llm_candidate_review"] = candidate_review
+    function_ranked = ranked
+    function_review = candidate_review
+    function_flows = flow_traces
+    if additive_review and controller_llm is not None and _env_bool("MYCODE_LLM_CANDIDATE_REVIEW", True):
+        # Keep the original investigation and function inputs; use extra work,
+        # not their slots, to evaluate newly nominated file responsibilities.
+        function_ranked = copy.deepcopy(ranked)
+        function_review = copy.deepcopy(candidate_review)
+        function_flows = copy.deepcopy(flow_traces)
+        main_read_paths = {context["path"] for context in code_contexts if context.get("snippets")}
+        for item in function_ranked:
+            item.belief = _candidate_belief(item, function_flows, verifier, frontier_queries,
+                                            read_paths=main_read_paths)
+        supplemental_order = investigation_order(ranked, verification_seeds, files=index.files)[:6]
+        supplemental_contexts = align_read_entities(
+            _read_code_context(index, supplemental_order, retrieval_queries, limit=6), index.entities)
+        supplemental_index = _restricted_index(index, [item.path for item in supplemental_order])
+        supplemental_flows, _ = _run_flow_backends_layered(
+            flow_index=supplemental_index, sample=sample, evidence_result=evidence_result,
+            active_queries=active_queries, candidate_paths=[item.path for item in supplemental_order],
+            issue_sketch=build_issue_sketch(sample, evidence_result), confidence=pre_flow_confidence,
+            round_no=round_no, max_rounds=max_rounds, flow_limit=flow_limit)
+        supplemental_review = review_candidates(
+            llm=controller_llm, issue_text=_issue_query_text(sample.issue_text),
+            issue_sketch=build_issue_sketch(sample, evidence_result), ranked=supplemental_order,
+            code_contexts=supplemental_contexts,
+            flow_traces=_merge_flow_traces(function_flows, supplemental_flows),
+            round_no=round_no, candidate_limit=6,
+            repair_attempts=_env_int("MYCODE_LLM_REVIEW_REPAIR_ATTEMPTS", 1, minimum=0))
+        primary_paths = {item["path"] for item in candidate_review.get("candidates", [])}
+        new_decisions = {**supplemental_review, "candidates": [item for item in
+            supplemental_review.get("candidates", []) if item["path"] not in primary_paths]}
+        ranked = _apply_llm_candidate_review(
+            ranked + [item for item in supplemental_order if item.path not in {row.path for row in ranked}],
+            new_decisions, component_scores=component_scores, top_k=top_k,
+            code_contexts=supplemental_contexts)
+        candidate_review = _merge_closure_candidate_reviews([
+            {"llm_candidate_review": candidate_review}, {"llm_candidate_review": supplemental_review}])
+        candidate_review.update(
+            continue_search=bool(function_review.get("continue_search") or supplemental_review.get("continue_search")),
+            next_queries=_dedupe(list(function_review.get("next_queries", []) or [])
+                                 + list(supplemental_review.get("next_queries", []) or [])),
+            missing_evidence=_dedupe(list(function_review.get("missing_evidence", []) or [])
+                                     + list(supplemental_review.get("missing_evidence", []) or [])))
+        code_contexts = list(_closure_context_map(code_contexts + supplemental_contexts).values())
+        flow_traces = _merge_flow_traces(function_flows, supplemental_flows)[:34]
+        verifier["llm_candidate_review"] = candidate_review
+    if verification_seeds:
+        verifier["nomination_bridge"] = {
+            "enabled": True,
+            "requested": [item.path for item in verification_seeds],
+            "actually_read": [context["path"] for context in code_contexts if context.get("snippets")],
+            "actually_reviewed": [item["path"] for item in candidate_review.get("candidates", [])],
+            "review_status": supplemental_review.get("status") if additive_review and controller_llm is not None and _env_bool("MYCODE_LLM_CANDIDATE_REVIEW", True) else candidate_review.get("status"),
+            "policy": "investigation opportunity only; no score bonus or verification bypass",
+            "additive_review": additive_review,
+        }
+        if additive_review and controller_llm is not None and _env_bool("MYCODE_LLM_CANDIDATE_REVIEW", True):
+            verifier["nomination_bridge"].update(
+                primary_review=function_review, supplemental_review=supplemental_review,
+                primary_function_files=[item.path for item in function_ranked],
+                primary_read_paths=sorted(main_read_paths))
     previous_by_path = {_norm_path(item.path): item for item in previous_ranked}
     read_paths = {_norm_path(str(context.get("path") or "")) for context in code_contexts}
     for item in ranked:
@@ -4889,27 +4958,43 @@ def _run_search_round(
         )
         ranked_modules, ranked_functions = _rank_entities(
             index=index,
-            ranked_files=ranked,
+            ranked_files=function_ranked if additive_review else ranked,
             entity_hits=entity_hits,
-            flow_traces=flow_traces,
+            flow_traces=function_flows if additive_review else flow_traces,
             top_k=entity_pool_k,
-            candidate_review=candidate_review,
+            candidate_review=function_review if additive_review else candidate_review,
             entity_queries=entity_grounding_queries,
         )
         ranked_modules = _rerank_entities_with_roles(
             entities=ranked_modules,
             sample=sample,
             evidence_result=evidence_result,
-            flow_traces=flow_traces,
+            flow_traces=function_flows if additive_review else flow_traces,
             top_k=top_k,
         )
         ranked_functions = _rerank_entities_with_roles(
             entities=ranked_functions,
             sample=sample,
             evidence_result=evidence_result,
-            flow_traces=flow_traces,
+            flow_traces=function_flows if additive_review else flow_traces,
             top_k=top_k,
         )
+        if (additive_review and controller_llm is not None
+                and _env_bool("MYCODE_LLM_CANDIDATE_REVIEW", True)
+                and _env_bool("MYCODE_GALA_FUNCTION_RESERVOIR", False)):
+            # Keep supplemental discoveries outside primary scores and votes.
+            # Source rereading and independent responsibility axes decide final
+            # eligibility, never the globally nominated file's rank.
+            _, extra_functions = _rank_entities(
+                index=index, ranked_files=supplemental_order, entity_hits=[],
+                flow_traces=supplemental_flows, top_k=entity_pool_k,
+                candidate_review=supplemental_review, entity_queries=entity_grounding_queries)
+            windows = _closure_context_map(supplemental_contexts)
+            observed_functions = [entity for entity in extra_functions if any(
+                snippet.get("start_line", 0) <= entity.end_line
+                and snippet.get("end_line", 0) >= max(1, entity.start_line)
+                for snippet in windows.get(entity.path, {}).get("snippets", []))]
+            verifier["supplemental_function_candidates"] = [item.to_dict() for item in observed_functions[:12]]
         phase_event(
             "progress",
             "dynamic.rank_entities",
@@ -5835,7 +5920,8 @@ def _reread_function_ledger(index, rankings, issue_text, *, limit=24):
     return ledger
 
 
-def _joint_round_consensus(selected, rankings, *, key, contexts, top_k, entity_evidence=None):
+def _joint_round_consensus(selected, rankings, *, key, contexts, top_k, entity_evidence=None,
+                           extra_candidates=()):
     """Recover recurrent, source-observed candidates without comparing raw scores.
 
     Files retain the selected checkpoint's extra vote, entities do not inherit
@@ -5851,6 +5937,12 @@ def _joint_round_consensus(selected, rankings, *, key, contexts, top_k, entity_e
     appearances = Counter()
     original = {key(item): i for i, item in enumerate(selected)}
     entity_evidence = entity_evidence or {}
+    # Supplemental investigations are not additional rounds or consensus votes.
+    # They can only enter through the existing strongly grounded tail reservoir.
+    if is_entity:
+        for item in extra_candidates:
+            if entity_evidence.get(key(item), {}).get("strong_singleton"):
+                by_key.setdefault(key(item), item)
     for ranking in rankings:
         seen = set()
         for rank, item in enumerate(ranking[:top_k], 1):
@@ -6384,6 +6476,7 @@ def _merge_closure_candidate_reviews(verifiers: Iterable[dict[str, Any]]) -> dic
     best: dict[str, dict[str, Any]] = {}
     attempts: list[dict[str, Any]] = []
     statuses: list[str] = []
+    observations: dict[str, list[dict[str, Any]]] = {}
     for verifier in verifiers or []:
         review = (verifier or {}).get("llm_candidate_review") or {}
         if review.get("status"):
@@ -6393,6 +6486,7 @@ def _merge_closure_candidate_reviews(verifiers: Iterable[dict[str, Any]]) -> dic
             path = _norm_path(str(item.get("path") or ""))
             if not path:
                 continue
+            observations.setdefault(path, []).extend(item.get("review_observations") or [dict(item)])
             score = (
                 1 if item.get("mechanism_verified", False) else 0,
                 1 if item.get("grounded", item.get("quote_supported", False)) else 0,
@@ -6408,6 +6502,23 @@ def _merge_closure_candidate_reviews(verifiers: Iterable[dict[str, Any]]) -> dic
             )
             if current is None or score > current_score:
                 best[path] = dict(item)
+    if _env_bool("MYCODE_GALA_REVIEW_CONFLICT_GUARD", False):
+        for path, selected in best.items():
+            history = observations[path]
+            positive = [row for row in history if row.get("grounded")
+                        and row.get("role") == "patch_target" and row.get("mechanism_verified")]
+            negative = [row for row in history if row.get("grounded")
+                        and row.get("role") in {"unlikely", "navigation_only", "reproduction_only", "test_or_docs"}
+                        and row.get("counterevidence")]
+            # A contradictory review is not a proven exclusion. Preserve both
+            # observations and the candidate, but do not certify responsibility
+            # by selecting the highest-confidence side of an unresolved dispute.
+            selected["review_observations"] = history
+            if positive and negative:
+                selected.update(role="supporting_target", mechanism_verified=False,
+                                counterevidence=[], counterevidence_grounded=False,
+                                responsibility_conflict=True,
+                                conflict_resolution="unresolved_no_verified_promotion")
     return {
         "status": "ok" if best else (statuses[-1] if statuses else "missing"),
         "source": "cross_round_candidate_review_memory",
@@ -7420,6 +7531,10 @@ def dynamic_localize(
         for idx, path in enumerate(bootstrap_candidate_paths)
     ]
     previous_ranked: list[RankedLocation] = list(initial_seed_ranking)
+    nomination_paths = set((fast_seed_plan.get("global_file_selector") or {}).get("candidate_files", []))
+    verification_seeds = ([item for item in initial_seed_ranking if item.path in fast_seed_paths
+                           and item.path in nomination_paths][:3]
+                          if _env_bool("MYCODE_GALA_VERIFY_NOMINATIONS", False) else [])
     previous_flow_traces: list[dict[str, Any]] = _merge_flow_traces(
         react_agent.get("flow_traces", []) or [],
         bootstrap_agent.get("flow_traces", []) or [],
@@ -7448,6 +7563,7 @@ def dynamic_localize(
                 controller_llm=controller_llm,
                 query_groups=query_groups,
                 previous_round_progress=previous_round_progress,
+                verification_seeds=verification_seeds,
             )
             phase_event(
                 "progress",
@@ -7792,13 +7908,24 @@ def dynamic_localize(
         joint_files = {"strategy": "preserve_precision_closure_order_v3",
                        "before": [i.path for i in ranked], "after": [i.path for i in ranked],
                        "recovered": []}
+        supplemental_functions = []
+        if _env_bool("MYCODE_GALA_FUNCTION_RESERVOIR", False):
+            for search_round in rounds:
+                supplemental_functions.extend(RankedEntity(**row) for row in
+                    search_round.verifier.get("supplemental_function_candidates", []))
+        ledger_rankings = [r.ranked_functions for r in rounds]
+        if supplemental_functions:
+            ledger_rankings.extend(supplemental_functions[i:i + 12]
+                                   for i in range(0, len(supplemental_functions), 12))
         ledger = _reread_function_ledger(
-            index, [r.ranked_functions for r in rounds], _issue_query_text(sample.issue_text),
-            limit=_env_int("MYCODE_FUNCTION_REREAD_LIMIT", 24, minimum=0),
+            index, ledger_rankings, _issue_query_text(sample.issue_text),
+            limit=_env_int("MYCODE_GALA_FUNCTION_REREAD_LIMIT", 48, minimum=0) if supplemental_functions
+                  else _env_int("MYCODE_FUNCTION_REREAD_LIMIT", 24, minimum=0),
         ) if _env_bool("MYCODE_FUNCTION_SOURCE_LEDGER", True) else {}
         ranked_functions, joint_functions = _joint_round_consensus(
             ranked_functions, [r.ranked_functions for r in rounds], key=lambda i: i.id,
-            contexts=all_context_map, top_k=top_k, entity_evidence=ledger)
+            contexts=all_context_map, top_k=top_k, entity_evidence=ledger,
+            extra_candidates=supplemental_functions)
         round_selection["joint_evidence_v2"] = {"files": joint_files, "functions": joint_functions}
         rank_stage_snapshots["joint_evidence_v2"] = _rank_stage_snapshot(ranked, limit=top_k)
     modification_closure["ranking_adjustment"] = closure_rerank

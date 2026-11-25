@@ -31,8 +31,9 @@ def main():
     parser.add_argument('--run-dir', type=Path, required=True)
     parser.add_argument('--model', default='mimo-v2.6-pro')
     parser.add_argument('--phase', choices=['seed', 'localize'], default='seed')
-    parser.add_argument('--variant', choices=['global', 'guard', 'joint'], default='global')
+    parser.add_argument('--variant', choices=['global', 'guard', 'joint', 'bridge', 'additive', 'conflict', 'reservoir'], default='global')
     parser.add_argument('--prepare-only', action='store_true', help='Freeze inputs and code without any model call')
+    parser.add_argument('--arm-order', choices=['alternating', 'baseline-first', 'improved-first'], default='alternating')
     parser.add_argument('--instance-id', action='append', required=True)
     args = parser.parse_args()
     if args.run_dir.exists():
@@ -77,14 +78,35 @@ def main():
         protocol='paired v1 localization with cached task-time upstream evidence; not full E2E')
     manifest['runner_sha256'] = sha(Path(__file__))
     manifest['variant'] = args.variant
-    manifest['arms'] = {'baseline': {'MYCODE_GALA_GLOBAL_FILES': '0', 'MYCODE_GALA_SEED_GUARD': '0'},
-        'improved': {'MYCODE_GALA_GLOBAL_FILES': '1' if args.variant in {'global', 'joint'} else '0',
-                     'MYCODE_GALA_SEED_GUARD': '1' if args.variant in {'guard', 'joint'} else '0'}}
+    manifest['arm_order'] = args.arm_order
+    manifest['arms'] = {'baseline': {'MYCODE_GALA_GLOBAL_FILES': '0', 'MYCODE_GALA_SEED_GUARD': '0',
+                                   'MYCODE_GALA_VERIFY_NOMINATIONS': '0', 'MYCODE_GALA_ADDITIVE_REVIEW': '0'},
+        'improved': {'MYCODE_GALA_GLOBAL_FILES': '1' if args.variant in {'global', 'joint', 'bridge', 'additive'} else '0',
+                     'MYCODE_GALA_SEED_GUARD': '1' if args.variant in {'guard', 'joint', 'bridge', 'additive'} else '0',
+                     'MYCODE_GALA_VERIFY_NOMINATIONS': '1' if args.variant in {'bridge', 'additive'} else '0',
+                     'MYCODE_GALA_ADDITIVE_REVIEW': '1' if args.variant == 'additive' else '0'}}
+    for arm in manifest['arms'].values():
+        arm['MYCODE_GALA_REVIEW_CONFLICT_GUARD'] = '0'
+        arm['MYCODE_GALA_FUNCTION_RESERVOIR'] = '0'
+        arm['MYCODE_GALA_FUNCTION_REREAD_LIMIT'] = '48'
+    if args.variant in {'conflict', 'reservoir'}:
+        # Matched latest-v4 versus latest-v4 + conflict handling, not v1.
+        for arm in manifest['arms'].values():
+            for key in ('MYCODE_GALA_GLOBAL_FILES', 'MYCODE_GALA_SEED_GUARD',
+                        'MYCODE_GALA_VERIFY_NOMINATIONS', 'MYCODE_GALA_ADDITIVE_REVIEW'):
+                arm[key] = '1'
+        manifest['arms']['improved']['MYCODE_GALA_REVIEW_CONFLICT_GUARD'] = '1'
+        if args.variant == 'reservoir':
+            # Hold conflict handling fixed; isolate source-supported tail memory.
+            manifest['arms']['baseline']['MYCODE_GALA_REVIEW_CONFLICT_GUARD'] = '1'
+            manifest['arms']['improved']['MYCODE_GALA_FUNCTION_RESERVOIR'] = '1'
     manifest['fixed_environment'] = {key: os.environ[key] for key in (
         'MYCODE_FAST_SEED_PLANNER', 'MYCODE_FAST_SEED_LLM', 'MYCODE_READ_EXPLICIT_PATHS',
         'MYCODE_JOINT_EVIDENCE_V2', 'MYCODE_FUNCTION_SOURCE_LEDGER', 'MYCODE_FILE_FRONT_RERANK',
         'MYCODE_FUNCTION_FINAL_POLICY', 'MYCODE_LLM_CANDIDATE_REVIEW',
         'MYCODE_LLM_REVIEW_CANDIDATES', 'MYCODE_LLM_THINKING', 'MYCODE_LLM_RETRIES')}
+    manifest['fixed_environment'].update({key: os.environ.get(key, '') for key in (
+        'MYCODE_LLM_ENABLE_THINKING', 'MYCODE_LLM_TOKEN_FIELD', 'MYCODE_MODEL_PROFILE')})
     (args.run_dir / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     for relative in hashes:
         destination = args.run_dir / 'source_snapshot' / relative
@@ -125,7 +147,8 @@ def main():
         (args.run_dir / f'{iid}.input.json').write_text(json.dumps(input_payload, ensure_ascii=False))
         if args.prepare_only:
             continue
-        for arm in (['baseline', 'improved'] if number % 2 == 0 else ['improved', 'baseline']):
+        baseline_first = args.arm_order == 'baseline-first' or (args.arm_order == 'alternating' and number % 2 == 0)
+        for arm in (['baseline', 'improved'] if baseline_first else ['improved', 'baseline']):
             assert all(sha(ROOT / p) == value for p, value in hashes.items()), 'Source changed during run'
             os.environ.update(manifest['arms'][arm])
             events = []
@@ -163,6 +186,7 @@ def main():
             else:
                 output['valid'] = output['valid'] and bool(result.get('dynamic_rounds')) and all(
                     r.get('verifier', {}).get('llm_candidate_review', {}).get('status') == 'ok'
+                    and r.get('verifier', {}).get('nomination_bridge', {}).get('review_status', 'ok') == 'ok'
                     for r in result.get('dynamic_rounds', []))
             (args.run_dir / f'{iid}.{arm}.json').write_text(json.dumps(output, ensure_ascii=False, indent=2))
             outcomes.append(output)
@@ -190,7 +214,7 @@ def main():
         rank = next((n for n, p in enumerate(output['paths'], 1) if p in gs), 0)
         score = dict(instance_id=output['instance_id'], arm=output['arm'], first_rank=rank,
             valid=output['valid'],
-            **{f'A{k}': int(0 < rank <= k) for k in [1, 3, 5, 8, 15]})
+            **{f'A{k}': int(0 < rank <= k) for k in list(range(1, 11)) + [15]})
         score['file_metrics'] = evaluate_file_ranking(output['paths'], list(gs))
         if args.phase == 'localize':
             functions = output['result'].get('ranked_functions', [])[:15]

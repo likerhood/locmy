@@ -97,6 +97,29 @@ def test_one_round_grounded_discovery_can_use_tail_reservoir():
     assert selected == items[:5]
 
 
+def test_supplemental_entity_needs_independent_source_axes_and_cannot_replace_head():
+    items = [SimpleNamespace(id=f"a::{i}", path="a", start_line=i+1, end_line=i+1)
+             for i in range(7)]
+    selected, strong, weak = items[:5], items[5], items[6]
+    evidence = {strong.id: {"source_read": True, "strong_singleton": True, "best_rank": 1},
+                weak.id: {"source_read": True, "strong_singleton": False, "best_rank": 1}}
+    result, log = _joint_round_consensus(selected, [selected], key=lambda i: i.id,
+        contexts={}, top_k=5, entity_evidence=evidence, extra_candidates=[strong, weak])
+    assert result[:3] == selected[:3]
+    assert strong in result and weak not in result
+    assert len(result) == len({i.id for i in result}) == 5
+    assert log['source_reservoir'] == [{'id': strong.id, 'replaced': selected[-1].id}]
+    assert selected == items[:5]
+
+
+def test_supplemental_unobserved_entity_cannot_gain_consensus_votes():
+    original = SimpleNamespace(id='a::original', path='a', start_line=1, end_line=2)
+    extra = SimpleNamespace(id='a::extra', path='a', start_line=3, end_line=4)
+    result, log = _joint_round_consensus([original], [[original]], key=lambda i: i.id,
+        contexts={}, top_k=1, extra_candidates=[extra] * 10)
+    assert result == [original] and log['recovered'] == []
+
+
 def test_joint_final_file_order_equals_existing_closure(monkeypatch, tmp_path):
     from mycode.dynamic_retrieval.search_agent import dynamic_localize
     from mycode.schemas.evidence import NormalizedSample

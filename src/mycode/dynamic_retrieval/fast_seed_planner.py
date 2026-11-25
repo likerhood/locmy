@@ -9,6 +9,7 @@ from typing import Any, Callable, Iterable
 
 from mycode.repo_index.structure_index import RepositoryIndex
 from mycode.dynamic_retrieval.package_navigation import package_entry_candidates, navigation_only_file
+from mycode.dynamic_retrieval.global_file_selector import nominate_global_files, visual_observations
 
 
 LLMController = Callable[[str], str | dict[str, Any]]
@@ -189,6 +190,19 @@ def plan_fast_seeds(
     selection_metadata: dict[str, dict[str, Any]] = {}
     llm_status = "disabled"
     use_llm = os.environ.get("MYCODE_FAST_SEED_LLM", "1").strip().lower() not in {"0", "false", "off", "no"}
+    global_enabled = os.environ.get("MYCODE_GALA_GLOBAL_FILES", "0").strip().lower() in {"1", "true", "on", "yes"}
+    global_plan: dict[str, Any] = {"enabled": global_enabled, "status": "disabled", "candidate_files": []}
+    if global_enabled and controller_llm is not None and use_llm:
+        global_plan = nominate_global_files(
+            paths=list(index.files), issue_text=issue_text, evidence=evidence_result,
+            controller=controller_llm,
+        )
+        for path in global_plan["candidate_files"]:
+            channels[path].add("global_semantic_prior")
+            reasons[path].append("repository_structure_nomination_requires_source_verification")
+        # Keep all original lexical candidates. Independent nominations expand
+        # the investigation pool, not the final Top15 or function ranking.
+        candidate_files = _dedupe(candidate_files + global_plan["candidate_files"], candidate_limit + 5)
     if controller_llm is not None and use_llm:
         summaries: list[str] = []
         entities_by_path: dict[str, list[str]] = defaultdict(list)
@@ -218,6 +232,13 @@ def plan_fast_seeds(
             '"evidence_channels":["symbol","path","visual","workflow"],'
             '"verification_query":"specific symbol or behavior to verify"}]}.'
         )
+        if global_plan.get("status") == "ok":
+            prompt += (
+                "\nObserved visual evidence:\n" + (visual_observations(evidence_result) or "none") +
+                "\nA global_semantic_prior is a repository-wide hypothesis, not independent source proof. "
+                "Compare hypotheses by the operation that needs changing. Return navigation targets separately "
+                "from plausible implementation targets; neither is verified at this stage."
+            )
         try:
             selected, selection_metadata = _parse_selected_paths(
                 controller_llm(prompt), set(candidate_files)
@@ -245,6 +266,7 @@ def plan_fast_seeds(
                 len(channels[path]) >= 2
                 or "local_code_url" in channels[path]
                 or "exact_issue_path" in channels[path]
+                or "global_semantic_prior" in channels[path]
                 or scores[path] >= best_score * 0.75
             )
         )
@@ -265,7 +287,9 @@ def plan_fast_seeds(
     ]
     return {
         "enabled": True,
-        "strategy": "global_10_recall_then_6_responsibility_then_3_active_seeds",
+        "strategy": ("gala_repository_nomination_then_joint_seed_selection" if global_enabled
+                     else "global_10_recall_then_6_responsibility_then_3_active_seeds"),
+        "global_file_selector": global_plan,
         "candidate_files": candidate_files,
         "responsibility_candidates": selected,
         "seed_files": seed_files,

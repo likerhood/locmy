@@ -7337,6 +7337,7 @@ def dynamic_localize(
         {
             "step": "fast_seed_planner",
             "strategy": fast_seed_plan.get("strategy"),
+            "global_file_selector": fast_seed_plan.get("global_file_selector", {"enabled": False}),
             "candidate_files": fast_seed_plan.get("candidate_files", []),
             "seed_files": fast_seed_paths,
             "persistent_seed_files": persistent_seed_paths,
